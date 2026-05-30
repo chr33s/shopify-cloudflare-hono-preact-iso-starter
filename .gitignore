@@ -1,0 +1,7 @@
+.wrangler/
+.shopify/
+dist/
+node_modules/
+cloudflare.d.ts
+.env*
+!.env.example

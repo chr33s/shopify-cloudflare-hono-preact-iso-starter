@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "shopify-starter",
+  "compatibility_date": "2026-03-20",
+  "compatibility_flags": ["nodejs_als"],
+  "main": "./src/server/index.ts",
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist/client",
+    "not_found_handling": "none",
+    "run_worker_first": true
+  },
+  "kv_namespaces": [
+    {
+      "binding": "SESSION_KV",
+      "id": "<your-kv-namespace-id>",
+      "preview_id": "<your-preview-kv-namespace-id>"
+    }
+  ],
+  "secrets": {
+    "required": ["SHOPIFY_API_SECRET_KEY"]
+  },
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "SHOPIFY_API_KEY": "<your-shopify-api-key>",
+    "SHOPIFY_APP_HANDLE": "shopify-starter",
+    "SHOPIFY_APP_URL": "https://your-app-url.example.com"
+  }
+}

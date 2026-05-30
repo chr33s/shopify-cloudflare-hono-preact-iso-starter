@@ -1,0 +1,37 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "<your-shopify-api-key>"
+application_url = "https://your-app-url.example.com"
+embedded = true
+name = "Shopify Starter"
+handle = "shopify-starter"
+
+[access.admin]
+direct_api_mode = "online"
+embedded_app_direct_api_access = true
+
+[access_scopes]
+scopes = "read_products"
+use_legacy_install_flow = false
+
+[app_proxy]
+url = "https://your-app-url.example.com/apps/shopify-starter"
+subpath = "shopify-starter"
+prefix = "apps"
+
+[auth]
+redirect_urls = ["https://your-app-url.example.com/shopify/auth/callback"]
+
+[build]
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2026-04"
+
+[[webhooks.subscriptions]]
+uri = "/shopify/webhooks"
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+topics = ["app/uninstalled"]
+
+[pos]
+embedded = false
