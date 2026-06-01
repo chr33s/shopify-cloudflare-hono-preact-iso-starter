@@ -1,19 +1,49 @@
-import type { ComponentChildren, HTMLAttributes, TargetedMouseEvent } from "preact";
+import type { ComponentChildren } from "preact";
 import { ErrorBoundary, LocationProvider, Route, Router, useLocation } from "preact-iso";
 import { useEffect, useState } from "preact/hooks";
 
 export function App() {
 	return (
 		<LocationProvider>
-			<ErrorBoundary>
-				<Router>
-					<Route path="/" component={Home} />
-					<Route path="/dashboard" component={Dashboard} />
-					<Route default component={NotFound} />
-				</Router>
-			</ErrorBoundary>
+			<AppProvider>
+				<ErrorBoundary>
+					<Router>
+						<Route path="/" component={Home} />
+						<Route path="/dashboard" component={Dashboard} />
+						<Route default component={NotFound} />
+					</Router>
+				</ErrorBoundary>
+			</AppProvider>
 		</LocationProvider>
 	);
+}
+
+function AppProvider(props: { children: ComponentChildren }) {
+	const { route } = useLocation();
+
+	useEffect(() => {
+		const handleNavigate = (event: Event) => {
+			const target = event.target as HTMLElement | null;
+			if (!target) return;
+
+			const href = target.getAttribute("href");
+			if (!href) return;
+
+			const targetAttr = target.getAttribute("target");
+			if (targetAttr && targetAttr !== "_self" && targetAttr !== "auto") return;
+
+			const url = new URL(href, window.location.origin);
+			if (!/^https?:$/i.test(url.protocol) || url.origin !== window.location.origin) return;
+			if (!url.pathname.startsWith("/app")) return;
+
+			route(url.pathname + url.search + url.hash);
+		};
+
+		document.addEventListener("shopify:navigate", handleNavigate);
+		return () => document.removeEventListener("shopify:navigate", handleNavigate);
+	}, [route]);
+
+	return props.children;
 }
 
 function Home() {
@@ -110,34 +140,8 @@ function NotFound() {
 		<s-page heading="Not found">
 			<s-section>
 				<s-paragraph>That page does not exist.</s-paragraph>
-				<Link href="/dashboard">Return to the dashboard</Link>
+				<s-link href="/dashboard">Return to the dashboard</s-link>
 			</s-section>
 		</s-page>
-	);
-}
-
-interface LinkProps extends Omit<HTMLAttributes<HTMLAnchorElement>, "href"> {
-	href: string;
-	children: ComponentChildren;
-}
-
-// Client-side nav via preact-iso preserves App Bridge + iframe state. Modifier
-// clicks still hard-navigate (Shopify recreates the embed from query params).
-function Link({ href, onClick, children, ...rest }: LinkProps) {
-	const { route } = useLocation();
-
-	function handleClick(event: TargetedMouseEvent<HTMLAnchorElement>) {
-		if (onClick) onClick(event);
-		if (event.defaultPrevented) return;
-		if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-		if (event.button !== 0) return;
-		event.preventDefault();
-		route(href);
-	}
-
-	return (
-		<a href={href} onClick={handleClick} {...rest}>
-			{children}
-		</a>
 	);
 }
