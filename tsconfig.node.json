@@ -1,10 +1,10 @@
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "allowImportingTsExtensions": false,
-    "composite": true,
-    "noEmit": false,
-    "types": ["vite/client"]
-  },
-  "include": ["*.config.ts"]
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"allowImportingTsExtensions": false,
+		"composite": true,
+		"noEmit": false,
+		"types": ["vite/client"]
+	},
+	"include": ["*.config.ts"]
 }

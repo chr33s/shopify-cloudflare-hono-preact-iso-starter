@@ -8,7 +8,12 @@ A minimal embedded Shopify app on Cloudflare Workers: [Hono](https://hono.dev) s
 ## Stack
 
 - **Server** — Hono on Workers. Routes under `src/server/routes`, Shopify auth core in
-  `src/server/libraries/shopify.ts` (token exchange, session storage in KV, webhook/proxy HMAC).
+  `src/server/shopify.ts`.
+- **Shopify auth** — [`@shopify/shopify-api`](https://github.com/Shopify/shopify-api-js) (via its
+  `cf-worker` adapter) handles the security primitives: session-token decode, webhook HMAC, and
+  app-proxy HMAC. Local extensions cover what the library doesn't: token exchange with expiring
+  offline tokens + refresh, KV session storage, app-proxy timestamp freshness, and the embedded
+  CSP/bounce headers.
 - **Client** — Preact SSR'd by the worker, hydrated in the browser. Routes in `src/client/routes`.
 - **Storage** — one KV namespace (`SESSION_KV`) for offline sessions.
 
