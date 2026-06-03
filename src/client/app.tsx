@@ -1,49 +1,63 @@
-import type { ComponentChildren } from "preact";
-import { ErrorBoundary, LocationProvider, Route, Router, useLocation } from "preact-iso";
+import { ErrorBoundary } from "preact-iso";
+import { LocationProvider, Route, Router, useLocation } from "preact-iso/router/navigation-api";
 import { useEffect, useState } from "preact/hooks";
 
 export function App() {
+	useShopifyNavigation();
+
 	return (
 		<LocationProvider>
-			<AppProvider>
-				<ErrorBoundary>
-					<Router>
-						<Route path="/" component={Home} />
-						<Route path="/dashboard" component={Dashboard} />
-						<Route default component={NotFound} />
-					</Router>
-				</ErrorBoundary>
-			</AppProvider>
+			<ErrorBoundary>
+				<Router>
+					<Route path="/" component={Home} />
+					<Route path="/dashboard" component={Dashboard} />
+					<Route default component={NotFound} />
+				</Router>
+			</ErrorBoundary>
 		</LocationProvider>
 	);
 }
 
-function AppProvider(props: { children: ComponentChildren }) {
-	const { route } = useLocation();
-
+function useShopifyNavigation() {
 	useEffect(() => {
-		const handleNavigate = (event: Event) => {
-			const target = event.target as HTMLElement | null;
-			if (!target) return;
+		function onClick(e: MouseEvent) {
+			if (
+				e.defaultPrevented ||
+				e.button !== 0 ||
+				e.metaKey ||
+				e.ctrlKey ||
+				e.shiftKey ||
+				e.altKey
+			) {
+				return;
+			}
 
-			const href = target.getAttribute("href");
-			if (!href) return;
+			const el = e
+				.composedPath()
+				.find(
+					(n): n is HTMLElement =>
+						n instanceof HTMLElement &&
+						/^s-(link|button|clickable)$/i.test(n.localName) &&
+						n.hasAttribute("href"),
+				);
+			if (!el) return;
 
-			const targetAttr = target.getAttribute("target");
-			if (targetAttr && targetAttr !== "_self" && targetAttr !== "auto") return;
+			const target = el.getAttribute("target");
+			if (target && target !== "_self" && target !== "auto") return;
 
-			const url = new URL(href, window.location.origin);
-			if (!/^https?:$/i.test(url.protocol) || url.origin !== window.location.origin) return;
-			if (!url.pathname.startsWith("/app")) return;
+			const url = new URL(el.getAttribute("href")!, location.origin);
+			if (url.origin !== location.origin) return;
 
-			route(url.pathname + url.search + url.hash);
-		};
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			(window as unknown as { navigation: { navigate(to: string): void } }).navigation.navigate(
+				url.pathname + url.search + url.hash,
+			);
+		}
 
-		document.addEventListener("shopify:navigate", handleNavigate);
-		return () => document.removeEventListener("shopify:navigate", handleNavigate);
-	}, [route]);
-
-	return props.children;
+		document.addEventListener("click", onClick, true);
+		return () => document.removeEventListener("click", onClick, true);
+	}, []);
 }
 
 function Home() {
