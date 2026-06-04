@@ -32,14 +32,17 @@ function useShopifyNavigation() {
 				return;
 			}
 
-			const el = e
-				.composedPath()
-				.find(
-					(n): n is HTMLElement =>
-						n instanceof HTMLElement &&
-						/^s-(link|button|clickable)$/i.test(n.localName) &&
-						n.hasAttribute("href"),
-				);
+			const path = e.composedPath();
+			// App Bridge owns s-app-nav navigation (it also syncs the admin chrome),
+			// so leave its links alone — intercept only in-body links.
+			if (path.some((n) => n instanceof HTMLElement && n.localName === "s-app-nav")) return;
+
+			const el = path.find(
+				(n): n is HTMLElement =>
+					n instanceof HTMLElement &&
+					/^s-(link|button|clickable)$/i.test(n.localName) &&
+					n.hasAttribute("href"),
+			);
 			if (!el) return;
 
 			const target = el.getAttribute("target");
@@ -50,9 +53,10 @@ function useShopifyNavigation() {
 
 			e.preventDefault();
 			e.stopImmediatePropagation();
-			(window as unknown as { navigation: { navigate(to: string): void } }).navigation.navigate(
-				url.pathname + url.search + url.hash,
-			);
+			// App Bridge's patched navigation.navigate() resolves its target with
+			// `new URL(href)` (no base), so it needs an absolute URL — a relative
+			// path throws "Invalid URL" and the navigation silently no-ops.
+			window.navigation.navigate(url.href);
 		}
 
 		document.addEventListener("click", onClick, true);
