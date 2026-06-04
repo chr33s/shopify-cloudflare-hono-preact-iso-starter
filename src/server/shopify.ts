@@ -689,7 +689,7 @@ function getToken(request: Request) {
 	);
 }
 
-function handleOptions(request: Request) {
+export function handleOptions(request: Request) {
 	if (request.method !== "OPTIONS") {
 		return undefined;
 	}
@@ -701,5 +701,19 @@ function handleOptions(request: Request) {
 		status: 204,
 	});
 	addCorsHeaders(request, response.headers);
+	return response;
+}
+
+export function withCors(request: Request, response: Response): Response {
+	const origin = request.headers.get("Origin");
+	if (origin) {
+		response.headers.set("Access-Control-Allow-Origin", origin);
+		response.headers.append("Vary", "Origin");
+	}
+	response.headers.set("Access-Control-Allow-Credentials", "true");
+	response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+	response.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+	// Custom headers are invisible to cross-origin `fetch` readers unless exposed.
+	response.headers.set("Access-Control-Expose-Headers", "X-Shopify-Retry-Invalid-Session-Request");
 	return response;
 }

@@ -10,6 +10,8 @@ import {
 	customer,
 	getInstallUrl,
 	getSessionTokenBounceHtml,
+	handleOptions,
+	withCors,
 	normalizeShopInput,
 	session,
 	webhook,
@@ -40,6 +42,21 @@ app.onError((error, c) => {
 	const message = error instanceof Error ? error.message : "Internal Server Error";
 	if (wantsJson) return c.json({ error: message }, 500);
 	return c.text("Internal Server Error", 500);
+});
+
+// CORS for embedded data/action fetches: App Bridge issues them cross-origin, so
+// they preflight (Authorization/Content-Type) and need ACAO + exposed headers.
+// An unanswered OPTIONS falls through to ASSETS → 404 → CORS failure. The
+// `wantsData` gate skips documents and assets, whose headers are immutable.
+app.use("*", async (c, next) => {
+	if (c.req.method === "OPTIONS") {
+		return handleOptions(c.req.raw) ?? new Response(null, { status: 204 });
+	}
+	await next();
+	const wantsData =
+		new URL(c.req.url).searchParams.has("_data") ||
+		(c.req.header("Accept") ?? "").includes("application/json");
+	if (wantsData) c.res = withCors(c.req.raw, c.res);
 });
 
 // Unauthenticated uptime probe.
