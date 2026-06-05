@@ -7,14 +7,14 @@ A minimal embedded Shopify app on Cloudflare Workers: [Hono](https://hono.dev) s
 
 ## Stack
 
-- **Server** — Hono on Workers. Routes under `src/server/routes`, Shopify auth core in
+- **Server** — Hono on Workers. Routes defined in `src/server/app.ts`, Shopify auth core in
   `src/server/shopify.ts`.
 - **Shopify auth** — [`@shopify/shopify-api`](https://github.com/Shopify/shopify-api-js) (via its
   `cf-worker` adapter) handles the security primitives: session-token decode, webhook HMAC, and
   app-proxy HMAC. Local extensions cover what the library doesn't: token exchange with expiring
   offline tokens + refresh, KV session storage, app-proxy timestamp freshness, and the embedded
   CSP/bounce headers.
-- **Client** — Preact SSR'd by the worker, hydrated in the browser. Routes in `src/client/routes`.
+- **Client** — Preact SSR'd by the worker, hydrated in the browser. Routes in `src/client/app.tsx`.
 - **Storage** — one KV namespace (`SESSION_KV`) for offline sessions.
 
 ## Setup
@@ -22,34 +22,39 @@ A minimal embedded Shopify app on Cloudflare Workers: [Hono](https://hono.dev) s
 1. Create a Shopify app in the [Partner Dashboard](https://partners.shopify.com) and note its API key + secret.
 2. Create a KV namespace:
    ```sh
-   npx wrangler kv namespace create shopify-starter
-   npx wrangler kv namespace create shopify-starter --preview
+   npx vp exec wrangler kv namespace create shopify-starter
+   npx vp exec wrangler kv namespace create shopify-starter --preview
    ```
 3. Fill in the placeholders in `wrangler.json` (`name`, KV ids, `SHOPIFY_API_KEY`,
    `SHOPIFY_APP_HANDLE`, `SHOPIFY_APP_URL`) and `shopify.app.toml` (`client_id`,
    `application_url`, `handle`, scopes, proxy URL, redirect URL).
 4. Local secret: `cp .env.example .env` and set `SHOPIFY_API_SECRET_KEY`.
-   In production: `npx wrangler secret put SHOPIFY_API_SECRET_KEY`.
-5. Generate binding types: `npm run typegen` (writes `cloudflare.d.ts`).
+   In production: `npx vp exec wrangler secret put SHOPIFY_API_SECRET_KEY`.
+5. Generate binding types: `npx vp run typegen` (writes `cloudflare.d.ts`).
+6. IDE setup: [viteplus.dev](https://viteplus.dev/guide/ide-integration)
 
 ## Develop
 
+Tooling is unified under [Vite+](https://viteplus.dev) — the `vp` CLI wraps the package
+manager, dev/build, tests, and linting.
+
 ```sh
-npm install
-npm run typegen          # generate cloudflare.d.ts (Env types)
-npm run shopify:dev      # Shopify CLI: tunnel + install flow (recommended)
+npx vp install
+npx vp run typegen           # generate cloudflare.d.ts (Env types)
+npx vp run shopify:dev       # Shopify CLI: tunnel + install flow (recommended)
 # or
-npm run dev              # Vite dev server on :8080 (needs your own tunnel)
+npx vp dev                   # dev server on :8080 (needs your own tunnel)
 ```
 
-`npm run codegen` generates typed Admin GraphQL operations into `src/types` from the
-queries in `src/**/*.{ts,tsx}`.
+`npx vp run codegen` generates typed Admin GraphQL operations into `src/types` from the
+queries in `src/**/*.{ts,tsx}`. Run `npx vp check` to format, lint, and type-check, and
+`npx vp test` to run tests.
 
 ## Build & deploy
 
 ```sh
-npm run build            # client + SSR worker bundle into dist/
-npm run deploy           # build, then `wrangler deploy`
+npx vp build                 # client + SSR worker bundle into dist/
+npx vp run deploy            # build, then `wrangler deploy`
 ```
 
 ## Routes

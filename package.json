@@ -8,12 +8,14 @@
 		]
 	},
 	"scripts": {
-		"dev": "vite dev",
-		"build": "vite build",
-		"preview": "vite preview",
-		"deploy": "npm run build && wrangler deploy",
+		"dev": "vp dev",
+		"build": "vp build",
+		"preview": "vp preview",
+		"test": "vp test",
+		"deploy": "vp build && wrangler deploy",
 		"codegen": "graphql-codegen --project=admin",
 		"typegen": "wrangler types cloudflare.d.ts",
+		"shopify:build": "shopify app build",
 		"shopify:dev": "shopify app dev"
 	},
 	"dependencies": {
@@ -25,13 +27,18 @@
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "^1.0.0",
+		"@cloudflare/vitest-pool-workers": "0.16.13",
 		"@preact/preset-vite": "^2.9.0",
 		"@shopify/api-codegen-preset": "^2.0.0",
 		"@shopify/app-bridge-types": "^0.7.0",
 		"@shopify/app-bridge-ui-types": "^0.3.3",
 		"@shopify/polaris-types": "^1.0.7",
+		"@testing-library/preact": "3.2.4",
+		"playwright": "1.60.0",
 		"typescript": "^6.0.3",
-		"vite": "^8.0.0",
+		"vite": "npm:@voidzero-dev/vite-plus-core@^0.1.24",
+		"vite-plus": "^0.1.24",
+		"vitest": "npm:@voidzero-dev/vite-plus-test@^0.1.24",
 		"wrangler": "^4.0.0"
 	},
 	"optionalDependencies": {
@@ -39,5 +46,6 @@
 	},
 	"engines": {
 		"node": "^24.0.0"
-	}
+	},
+	"packageManager": "npm@11.12.1"
 }

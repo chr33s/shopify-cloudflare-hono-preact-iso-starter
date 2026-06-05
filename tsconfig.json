@@ -11,15 +11,17 @@
 		"noEmit": true,
 		"skipLibCheck": true,
 		"paths": {
-			"#/*": ["./src/*"]
+			"#/*": ["./src/*"],
+			"vitest": ["./node_modules/vitest/dist/index.d.ts"]
 		},
 		"target": "ES2024",
 		"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
 		"types": [
+			"@cloudflare/vitest-pool-workers/types",
 			"@shopify/polaris-types",
 			"@shopify/app-bridge-ui-types",
 			"@shopify/app-bridge-types",
-			"vite/client"
+			"vite-plus/client"
 		]
 	},
 	"exclude": ["dist"],
