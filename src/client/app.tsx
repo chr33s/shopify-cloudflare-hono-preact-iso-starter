@@ -1,13 +1,12 @@
 import { ErrorBoundary } from "preact-iso";
-import { LocationProvider, Route, Router, useLocation } from "preact-iso/router/navigation-api";
+import { LocationProvider, Route, Router, useLocation } from "preact-iso/router";
 import { useEffect, useState } from "preact/hooks";
 
 export function App() {
-	useShopifyNavigation();
-
 	return (
 		<LocationProvider>
 			<ErrorBoundary>
+				<ShopifyNavigation />
 				<Router>
 					<Route path="/" component={Home} />
 					<Route path="/dashboard" component={Dashboard} />
@@ -18,7 +17,9 @@ export function App() {
 	);
 }
 
-function useShopifyNavigation() {
+function ShopifyNavigation() {
+	const { route } = useLocation();
+
 	useEffect(() => {
 		function onClick(e: MouseEvent) {
 			if (
@@ -53,15 +54,37 @@ function useShopifyNavigation() {
 
 			e.preventDefault();
 			e.stopImmediatePropagation();
-			// App Bridge's patched navigation.navigate() resolves its target with
-			// `new URL(href)` (no base), so it needs an absolute URL — a relative
-			// path throws "Invalid URL" and the navigation silently no-ops.
-			window.navigation.navigate(url.href);
+			// route() -> history.pushState, which App Bridge mirrors to the admin
+			// address bar (deep-link, reload, back/forward). No window.navigation
+			// dependency, so it also works standalone and on "/" before App Bridge loads.
+			route(url.pathname + url.search + url.hash);
+		}
+
+		// App Bridge updates the parent admin URL for s-app-nav links and fires
+		// shopify:navigate, but doesn't move the inner iframe — do it ourselves.
+		function onShopifyNavigate(e: Event) {
+			const href = (e.target as Element | null)?.getAttribute?.("href");
+			if (!href) return;
+			let dest: URL;
+			try {
+				dest = new URL(href, location.origin);
+			} catch {
+				return;
+			}
+			if (dest.origin !== location.origin) return;
+			if (dest.pathname + dest.search === location.pathname + location.search) return;
+			route(dest.pathname + dest.search + dest.hash);
 		}
 
 		document.addEventListener("click", onClick, true);
-		return () => document.removeEventListener("click", onClick, true);
-	}, []);
+		document.addEventListener("shopify:navigate", onShopifyNavigate);
+		return () => {
+			document.removeEventListener("click", onClick, true);
+			document.removeEventListener("shopify:navigate", onShopifyNavigate);
+		};
+	}, [route]);
+
+	return null;
 }
 
 function Home() {

@@ -38,6 +38,7 @@ export default defineConfig(({ mode }) => {
 		},
 		fmt: {
 			ignorePatterns: ["dist/**", ".claude/**", ".shopify/**", ".wrangler/**", "cloudflare.d.ts"],
+			useTabs: true,
 		},
 		test: {
 			passWithNoTests: true,
