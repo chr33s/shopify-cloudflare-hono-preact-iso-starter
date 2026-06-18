@@ -19,33 +19,37 @@
 		"shopify:dev": "shopify app dev"
 	},
 	"dependencies": {
-		"@shopify/shopify-api": "^13.0.0",
-		"hono": "^4.12.23",
-		"preact": "^10.22.0",
-		"preact-iso": "^2.12.0",
-		"preact-render-to-string": "^6.7.0"
+		"@shopify/shopify-api": "13.0.0",
+		"hono": "4.12.26",
+		"preact": "10.29.2",
+		"preact-iso": "2.12.0",
+		"preact-render-to-string": "6.7.0"
 	},
 	"devDependencies": {
-		"@cloudflare/vite-plugin": "^1.0.0",
-		"@cloudflare/vitest-pool-workers": "0.16.13",
-		"@preact/preset-vite": "^2.9.0",
-		"@shopify/api-codegen-preset": "^2.0.0",
-		"@shopify/app-bridge-types": "^0.7.0",
-		"@shopify/app-bridge-ui-types": "^0.3.3",
-		"@shopify/polaris-types": "^1.0.7",
+		"@cloudflare/vite-plugin": "1.41.0",
+		"@cloudflare/vitest-pool-workers": "0.16.16",
+		"@preact/preset-vite": "2.10.5",
+		"@shopify/api-codegen-preset": "2.0.0",
+		"@shopify/app-bridge-types": "0.7.1",
+		"@shopify/app-bridge-ui-types": "0.3.3",
+		"@shopify/polaris-types": "1.0.7",
 		"@testing-library/preact": "3.2.4",
-		"playwright": "1.60.0",
-		"typescript": "^6.0.3",
-		"vite": "npm:@voidzero-dev/vite-plus-core@^0.1.24",
-		"vite-plus": "^0.1.24",
-		"vitest": "npm:@voidzero-dev/vite-plus-test@^0.1.24",
-		"wrangler": "^4.0.0"
+		"@vitest/browser-playwright": "4.1.9",
+		"playwright": "1.61.0",
+		"typescript": "6.0.3",
+		"vite": "npm:@voidzero-dev/vite-plus-core@0.2.1",
+		"vite-plus": "0.2.1",
+		"vitest": "4.1.9",
+		"wrangler": "4.101.0"
 	},
 	"optionalDependencies": {
-		"@shopify/cli": "^4.0.0"
+		"@shopify/cli": "4.2.0"
+	},
+	"overrides": {
+		"vite": "$vite"
 	},
 	"engines": {
-		"node": "^24.0.0"
+		"node": ">=24.0.0"
 	},
 	"packageManager": "npm@11.12.1"
 }

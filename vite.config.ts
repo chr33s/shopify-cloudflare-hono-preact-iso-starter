@@ -1,4 +1,3 @@
-import { fileURLToPath } from "node:url";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 import preact from "@preact/preset-vite";
@@ -44,21 +43,7 @@ export default defineConfig(({ mode }) => {
 			passWithNoTests: true,
 			projects: [
 				{
-					// Server code runs in the real Workers runtime (workerd via miniflare).
 					plugins: [preact(), cloudflareTest({ wrangler: { configPath: "./wrangler.json" } })],
-					// The pool's worker runtime imports `vitest/worker`, which resolves to the
-					// top-level `vitest` alias copy. vite-plus otherwise reroutes bare `vitest` to
-					// its nested copy, so pin it to the same copy for one shared runner instance.
-					resolve: {
-						alias: [
-							{
-								find: /^vitest$/,
-								replacement: fileURLToPath(
-									new URL("./node_modules/vitest/dist/index.js", import.meta.url),
-								),
-							},
-						],
-					},
 					test: {
 						name: "server",
 						include: ["src/test/shopify.test.ts", "src/test/server-entry.test.ts"],
