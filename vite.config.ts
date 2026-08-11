@@ -46,7 +46,11 @@ export default defineConfig(({ mode }) => {
 					plugins: [preact(), cloudflareTest({ wrangler: { configPath: "./wrangler.json" } })],
 					test: {
 						name: "server",
-						include: ["src/test/shopify.test.ts", "src/test/server-entry.test.ts"],
+						include: [
+							"src/test/app.test.ts",
+							"src/test/shopify.test.ts",
+							"src/test/server-entry.test.ts",
+						],
 					},
 				},
 				{

@@ -19,7 +19,7 @@
 		"shopify:dev": "shopify app dev"
 	},
 	"dependencies": {
-		"@shopify/shopify-api": "13.0.0",
+		"@shopify/shopify-api": "14.0.0",
 		"hono": "4.12.26",
 		"preact": "10.29.2",
 		"preact-iso": "2.12.0",

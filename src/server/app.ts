@@ -19,7 +19,8 @@ import {
 
 export type AppEnv = {
 	Bindings: Env;
-	Variables: { admin: AuthenticatedAdmin };
+	// Optional: only set once `requireAdmin` has run for the matched route.
+	Variables: { admin?: AuthenticatedAdmin };
 };
 
 const app = new Hono<AppEnv>();
@@ -29,19 +30,25 @@ app.onError((error, c) => {
 		c.req.header("accept")?.includes("application/json") ||
 		c.req.header("content-type")?.includes("application/json");
 
-	if (error instanceof ShopifyError) {
-		if (wantsJson)
-			return c.json({ error: error.message }, error.status as Parameters<typeof c.json>[1]);
-		return new Response(error.message, {
-			headers: { "Content-Type": "text/plain; charset=utf-8" },
-			status: error.status,
-		});
+	// ShopifyError messages are written to be caller-facing; anything else is an
+	// internal failure whose message must not reach the client.
+	const isPublic = error instanceof ShopifyError;
+	if (!isPublic) {
+		console.error(error);
 	}
+	const status = isPublic ? error.status : 500;
+	const message = isPublic ? error.message : "Internal Server Error";
 
-	console.error(error);
-	const message = error instanceof Error ? error.message : "Internal Server Error";
-	if (wantsJson) return c.json({ error: message }, 500);
-	return c.text("Internal Server Error", 500);
+	const response = wantsJson
+		? c.json({ error: message }, status as Parameters<typeof c.json>[1])
+		: new Response(message, {
+				headers: { "Content-Type": "text/plain; charset=utf-8" },
+				status,
+			});
+
+	// The `app.use("*")` CORS pass never runs when the chain throws, so error
+	// responses would otherwise be unreadable to the embedded (cross-origin) client.
+	return withCors(c.req.raw, response);
 });
 
 // CORS for embedded data/action fetches: App Bridge issues them cross-origin, so
@@ -109,8 +116,9 @@ app.post("/shopify/webhooks", async (c) => {
 
 	switch (topic) {
 		case "app/uninstalled": {
-			// Drop the offline session so a reinstall mints a fresh one.
-			await session(c.env).set(authenticated.session.shop, null);
+			// Drop the offline session so a reinstall mints a fresh one. Keyed off the
+			// HMAC-verified domain, which is present even when no session was stored.
+			await session(c.env).set(authenticated.webhook.domain, null);
 			break;
 		}
 		// Mandatory GDPR compliance webhooks. This starter stores no customer PII,
@@ -126,10 +134,15 @@ app.post("/shopify/webhooks", async (c) => {
 	return new Response(null, { status: 204 });
 });
 
-app.use("/shopify/admin{/*}?", requireAdmin);
+app.use("/shopify/admin", requireAdmin);
 
 app.all("/shopify/admin", async (c) => {
+	// Defence in depth: a route pattern that stops matching must fail closed rather
+	// than run this handler unauthenticated.
 	const authenticated = c.get("admin");
+	if (!authenticated) {
+		throw new ShopifyError("Unauthorized", 401);
+	}
 
 	const upstream = await authenticated.client.requestRaw(c.req.raw);
 
@@ -192,10 +205,12 @@ app.get("*", async (c) => {
 	const appHtml = await renderApp(`${url.pathname}${url.search}`);
 	const nonce = generateCspNonce();
 	// CSP nonce on every <script> so script-src can drop 'unsafe-inline'.
+	// Function replacers throughout: with a string replacement, `$&`/`$'`/`` $` ``
+	// in rendered markup would be interpreted as substitution patterns.
 	const html = template
-		.replace(/<script(\s)/g, `<script nonce="${nonce}"$1`)
-		.replace("<!--head-outlet-->", getShopifyHead(c.req.raw, nonce))
-		.replace("<!--ssr-outlet-->", appHtml);
+		.replace(/<script(\s)/g, (_match, space: string) => `<script nonce="${nonce}"${space}`)
+		.replace("<!--head-outlet-->", () => getShopifyHead(c.req.raw, nonce))
+		.replace("<!--ssr-outlet-->", () => appHtml);
 
 	const response = c.html(html);
 	addHeaders(c.req.raw, response.headers, nonce);

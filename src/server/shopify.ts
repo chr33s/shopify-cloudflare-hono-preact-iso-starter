@@ -21,6 +21,11 @@ const ACCESS_TOKEN_REFRESH_LEEWAY_SECONDS = 120;
 
 const ALLOWED_DOMAINS = ["myshopify.com", "myshopify.io", "shop.dev", "shopify.com"];
 
+// Params Shopify only ever sends once on an app-proxy request. A repeat lets the
+// value the signature is verified against diverge from the value the app reads
+// back, so they are rejected outright.
+const APP_PROXY_SINGLE_VALUE_PARAMS = ["hmac", "shop", "signature", "timestamp"] as const;
+
 export type SessionType = "admin" | "storefront";
 
 export interface Session {
@@ -57,13 +62,16 @@ export interface ValidatedWebhook {
 	apiVersion: string;
 	domain: string;
 	payload: unknown;
-	subTopic?: string | null;
 	topic: string;
 	webhookId: string;
 }
 
 export interface AuthenticatedWebhook {
-	session: Session;
+	/**
+	 * Absent when the shop has no stored session — the HMAC is what authenticates a
+	 * webhook, and compliance topics legitimately arrive after the session is gone.
+	 */
+	session?: Session;
 	webhook: ValidatedWebhook;
 }
 
@@ -131,10 +139,10 @@ export function generateCspNonce(): string {
 
 export function getSessionTokenBounceHtml(request: Request, nonce?: string) {
 	const url = new URL(request.url);
-	const shopifyReload = url.searchParams.get("shopify-reload");
+	const shopifyReload = sameOriginReloadUrl(url.searchParams.get("shopify-reload"));
 	const nonceAttr = nonce ? ` nonce="${escapeHtml(nonce)}"` : "";
 	const reloadScript = shopifyReload
-		? /* html */ `<script${nonceAttr}>window.open(${JSON.stringify(shopifyReload)}, '_top');</script>`
+		? /* html */ `<script${nonceAttr}>window.open(${encodeJsonForScript(shopifyReload)}, '_top');</script>`
 		: "";
 
 	return /* html */ `
@@ -224,7 +232,6 @@ export async function validateWebhook(request: Request): Promise<ValidatedWebhoo
 		apiVersion: result.apiVersion,
 		domain,
 		payload: parseJson(rawBody),
-		subTopic: result.subTopic ?? null,
 		topic: request.headers.get("X-Shopify-Topic") ?? result.topic,
 		webhookId: result.webhookId,
 	};
@@ -332,6 +339,23 @@ export async function admin(request: Request, env: Env): Promise<AuthenticatedAd
 		throw new ShopifyError("Received invalid shop argument", 400);
 	}
 
+	// Reuse the stored offline session when we have one — token exchange is a
+	// round-trip to Shopify and is rate limited, so it must not run per request.
+	// Routes drop the session on a 401 from the Admin API (stale/revoked token),
+	// which sends the next request back through token exchange below.
+	const stored = await session(env).get(shop);
+	if (stored) {
+		try {
+			const currentSession = await ensureFreshSession(env, stored);
+			return {
+				client: client(currentSession),
+				session: currentSession,
+			};
+		} catch {
+			// Refresh token expired or revoked — fall through and mint a fresh pair.
+		}
+	}
+
 	// Admin API rejects non-expiring offline tokens with 403 (2026-04+).
 	// https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/offline-access-tokens#expiring-vs-non-expiring-offline-tokens
 	let librarySession: LibrarySession;
@@ -392,6 +416,16 @@ export async function customer(
 export async function proxy(request: Request, env: Env): Promise<AuthenticatedProxy> {
 	const url = new URL(request.url);
 
+	// Must run before anything reads the query. `searchParams.get()` returns the
+	// FIRST value while a collapsed `Record<string, string>` keeps the LAST, so a
+	// duplicated param lets the shop whose signature is verified differ from the
+	// shop whose session is loaded — a cross-shop auth bypass.
+	for (const param of APP_PROXY_SINGLE_VALUE_PARAMS) {
+		if (url.searchParams.getAll(param).length > 1) {
+			throw new ShopifyError(`Proxy query param "${param}" must not appear more than once`, 400);
+		}
+	}
+
 	const signature = url.searchParams.get("signature");
 	if (!signature) {
 		throw new ShopifyError("Proxy signature param is missing", 400);
@@ -402,27 +436,28 @@ export async function proxy(request: Request, env: Env): Promise<AuthenticatedPr
 		throw new ShopifyError("Proxy timestamp param is missing", 400);
 	}
 
+	// Two-sided window: a future-dated timestamp is as invalid as a stale one.
 	const now = Math.trunc(Date.now() / 1000);
-	const requestTimestamp = Number.parseInt(timestamp, 10);
+	const requestTimestamp = Number(timestamp);
 	if (
-		!Number.isFinite(requestTimestamp) ||
-		now - requestTimestamp > PROXY_SIGNATURE_MAX_AGE_SECONDS
+		!Number.isInteger(requestTimestamp) ||
+		Math.abs(now - requestTimestamp) > PROXY_SIGNATURE_MAX_AGE_SECONDS
 	) {
 		throw new ShopifyError("Proxy timestamp is expired", 401);
 	}
 
-	// Signature delegated to the library; the timestamp-freshness check above is local
-	// (the library validates the HMAC but not request age).
-	const query: Record<string, string> = {};
-	for (const [key, value] of url.searchParams.entries()) {
-		query[key] = value;
+	// Hand the library the URLSearchParams itself. Passing a pre-collapsed object
+	// would hide duplicate params from its own single-value guard.
+	let valid: boolean;
+	try {
+		valid = await getShopify().utils.validateHmac(url.searchParams, { signator: "appProxy" });
+	} catch (error) {
+		// validateHmac throws (rather than returning false) on a malformed query.
+		throw new ShopifyError(error instanceof Error ? error.message : "Invalid hmac", 401);
 	}
-	const valid = await getShopify().utils.validateHmac(query, { signator: "appProxy" });
 	if (!valid) {
 		throw new ShopifyError("Invalid hmac", 401);
 	}
-
-	// Replay enforcement runs per-route at the (sig + body-hash) layer.
 
 	const shop = sanitizeShop(url.searchParams.get("shop"));
 	if (!shop) {
@@ -442,11 +477,21 @@ export async function proxy(request: Request, env: Env): Promise<AuthenticatedPr
 
 export async function webhook(request: Request, env: Env): Promise<AuthenticatedWebhook> {
 	const validatedWebhook = await validateWebhook(request);
+
+	// The HMAC is what authenticates a webhook — a missing session is not an auth
+	// failure. Mandatory compliance topics legitimately arrive with no session:
+	// shop/redact lands ~48h after app/uninstalled already dropped it, and failing
+	// those deliveries puts the app out of compliance. Handlers that need a session
+	// check for one.
 	const stored = await session(env).get(validatedWebhook.domain);
-	if (!stored) {
-		throw new ShopifyError("No session found", 401);
+	let currentSession: Session | undefined;
+	if (stored) {
+		try {
+			currentSession = await ensureFreshSession(env, stored);
+		} catch {
+			currentSession = undefined;
+		}
 	}
-	const currentSession = await ensureFreshSession(env, stored);
 
 	return {
 		session: currentSession,
@@ -460,6 +505,39 @@ function escapeHtml(value: string) {
 		.replace(/"/g, "&quot;")
 		.replace(/</g, "&lt;")
 		.replace(/>/g, "&gt;");
+}
+
+/**
+ * `JSON.stringify` leaves `</script` intact, which would close the enclosing
+ * `<script>` element and let the rest of the value be parsed as markup. Escape the
+ * characters that can break out of a script body (and the two line terminators
+ * that are newlines to a JS parser but not to JSON).
+ */
+function encodeJsonForScript(value: unknown) {
+	return JSON.stringify(value)
+		.replace(/</g, "\\u003c")
+		.replace(/>/g, "\\u003e")
+		.replace(/\u2028/g, "\\u2028")
+		.replace(/\u2029/g, "\\u2029");
+}
+
+/**
+ * The bounce page calls `window.open(target, '_top')`, which escapes the admin
+ * iframe — an attacker-supplied absolute URL would be an open redirect out of the
+ * Shopify admin. Only ever bounce back into this app.
+ */
+function sameOriginReloadUrl(value: string | null) {
+	if (!value || !env.SHOPIFY_APP_URL) {
+		return null;
+	}
+
+	try {
+		const appOrigin = new URL(env.SHOPIFY_APP_URL).origin;
+		const target = new URL(value, appOrigin);
+		return target.origin === appOrigin ? target.toString() : null;
+	} catch {
+		return null;
+	}
 }
 
 function parseJson(value: string) {
@@ -485,14 +563,12 @@ async function verifyToken(encoded: string): Promise<DecodedSessionToken | null>
 	}
 }
 
-function addCorsHeaders(request: Request, responseHeaders: Headers, allowedShop?: string | null) {
+function addCorsHeaders(request: Request, responseHeaders: Headers) {
 	const origin = request.headers.get("Origin");
 	if (origin) {
-		// Never echo arbitrary origins. Shop-scoped (verdict path) or
-		// admin allow-list (admin/customer paths).
-		const allowed = allowedShop
-			? allowedOriginForShop(origin, allowedShop)
-			: allowedOriginForAdmin(origin);
+		// Never echo arbitrary origins — `Allow-Credentials: true` makes an echoed
+		// origin a cross-origin read of authenticated responses.
+		const allowed = allowedOriginForAdmin(origin);
 		if (allowed) {
 			responseHeaders.set("Access-Control-Allow-Origin", allowed);
 			responseHeaders.append("Vary", "Origin");
@@ -502,18 +578,6 @@ function addCorsHeaders(request: Request, responseHeaders: Headers, allowedShop?
 	responseHeaders.set("Access-Control-Allow-Credentials", "true");
 	responseHeaders.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
 	responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-}
-
-function allowedOriginForShop(origin: string, shop: string): string | null {
-	try {
-		const host = new URL(origin).hostname.toLowerCase();
-		const target = shop.toLowerCase();
-		// Exact match or merchant's custom primary-domain subdomain.
-		if (host === target || host.endsWith(`.${target}`)) return origin;
-	} catch {
-		return null;
-	}
-	return null;
 }
 
 function allowedOriginForAdmin(origin: string): string | null {
@@ -554,8 +618,16 @@ export function addHeaders(request: Request, responseHeaders: Headers, nonce?: s
 		`connect-src 'self' ${wsSelf} https://${shop ?? "*.myshopify.com"} https://admin.shopify.com ${SHOPIFY_CDN}`,
 		`img-src 'self' data: ${SHOPIFY_CDN}`,
 		`font-src 'self' data: ${SHOPIFY_CDN}`,
+		// `base-uri` matters specifically under 'strict-dynamic': an injected <base>
+		// would otherwise re-point every relative script URL.
+		`base-uri 'self'`,
+		`form-action 'self'`,
+		`object-src 'none'`,
 	];
 	responseHeaders.set("Content-Security-Policy", csp.join("; ") + ";");
+	responseHeaders.set("X-Content-Type-Options", "nosniff");
+	// Session tokens can ride in the query string (`id_token`); never leak a URL.
+	responseHeaders.set("Referrer-Policy", "no-referrer");
 
 	if (shop && !url.pathname.startsWith("/apps")) {
 		responseHeaders.set("Link", `<${APP_BRIDGE_URL}>; rel="preload"; as="script";`);
@@ -705,15 +777,28 @@ export function handleOptions(request: Request) {
 }
 
 export function withCors(request: Request, response: Response): Response {
-	const origin = request.headers.get("Origin");
-	if (origin) {
-		response.headers.set("Access-Control-Allow-Origin", origin);
-		response.headers.append("Vary", "Origin");
+	try {
+		applyCors(request, response.headers);
+		return response;
+	} catch {
+		// Headers on responses produced by `fetch()` — the ASSETS binding, upstream
+		// proxies — are immutable, so mutating them throws. Re-wrap and retry rather
+		// than letting that surface as a 500.
+		// The Response constructor rejects a body on a null-body status, which the
+		// ASSETS binding can legitimately return (304 on a conditional request).
+		const nullBodyStatus = [101, 204, 205, 304].includes(response.status);
+		const mutable = new Response(nullBodyStatus ? null : response.body, {
+			headers: new Headers(response.headers),
+			status: response.status,
+			statusText: response.statusText,
+		});
+		applyCors(request, mutable.headers);
+		return mutable;
 	}
-	response.headers.set("Access-Control-Allow-Credentials", "true");
-	response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
-	response.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+}
+
+function applyCors(request: Request, responseHeaders: Headers) {
+	addCorsHeaders(request, responseHeaders);
 	// Custom headers are invisible to cross-origin `fetch` readers unless exposed.
-	response.headers.set("Access-Control-Expose-Headers", "X-Shopify-Retry-Invalid-Session-Request");
-	return response;
+	responseHeaders.set("Access-Control-Expose-Headers", "X-Shopify-Retry-Invalid-Session-Request");
 }
