@@ -1,3 +1,5 @@
+
+
 # Shopify Starter
 
 A minimal embedded Shopify app on Cloudflare Workers: [Hono](https://hono.dev) server,
@@ -68,5 +70,5 @@ npx vp run deploy            # build, then `wrangler deploy`
 - `POST /shopify/webhooks` — validates webhook HMACs (`app/uninstalled` + mandatory GDPR topics).
 - `ALL /shopify/admin` — session-token-gated Admin GraphQL passthrough (the embedded client POSTs here).
 - `ALL /shopify/customer` — verifies the caller's Shopify auth and returns the customer id + shop.
-- `ALL /apps/*` — app-proxy catch-all; verifies the proxy signature and echoes the shop.
+- `ALL /apps/*` — app-proxy catch-all; verifies the proxy signature and returns the request path and shop.
 - `GET *` — SSR of the Preact app (everything else).
