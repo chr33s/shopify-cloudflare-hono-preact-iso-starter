@@ -16,6 +16,12 @@ import {
 	session,
 	webhook,
 } from "./shopify.ts";
+import {
+	deleteConfiguration,
+	parseConfigurationBody,
+	readConfiguration,
+	writeConfiguration,
+} from "#/configuration/record.ts";
 
 export type AppEnv = {
 	Bindings: Env;
@@ -119,6 +125,7 @@ app.post("/shopify/webhooks", async (c) => {
 			// Drop the offline session so a reinstall mints a fresh one. Keyed off the
 			// HMAC-verified domain, which is present even when no session was stored.
 			await session(c.env).set(authenticated.webhook.domain, null);
+			await deleteConfiguration(c.env.SESSION_KV, authenticated.webhook.domain);
 			break;
 		}
 		// Mandatory GDPR compliance webhooks. This starter stores no customer PII,
@@ -135,6 +142,40 @@ app.post("/shopify/webhooks", async (c) => {
 });
 
 app.use("/shopify/admin", requireAdmin);
+app.use("/api/configuration", requireAdmin);
+
+app.get("/api/configuration", async (c) => {
+	const authenticated = c.get("admin");
+	if (!authenticated) throw new ShopifyError("Unauthorized", 401);
+
+	try {
+		const record = await readConfiguration(c.env.SESSION_KV, authenticated.session.shop);
+		return c.json(record);
+	} catch (error) {
+		if (error instanceof Error && error.message === "Stored configuration is unreadable") {
+			throw new ShopifyError(error.message, 500);
+		}
+		throw error;
+	}
+});
+
+app.put("/api/configuration", async (c) => {
+	const authenticated = c.get("admin");
+	if (!authenticated) throw new ShopifyError("Unauthorized", 401);
+
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		throw new ShopifyError("Configuration body must be JSON.", 400);
+	}
+
+	const parsed = parseConfigurationBody(body);
+	if (!parsed.ok) throw new ShopifyError(parsed.error, 400);
+
+	await writeConfiguration(c.env.SESSION_KV, authenticated.session.shop, parsed.record);
+	return c.json(parsed.record);
+});
 
 app.all("/shopify/admin", async (c) => {
 	// Defence in depth: a route pattern that stops matching must fail closed rather

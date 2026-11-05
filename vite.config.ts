@@ -5,6 +5,9 @@ import { defineConfig, loadEnv } from "vite-plus";
 import { playwright } from "vite-plus/test/browser/providers/playwright";
 import wrangler from "./wrangler.json" with { type: "json" };
 
+// Native Preact only. The preset aliases react → preact/compat unless this is off.
+const nativePreact = () => preact({ reactAliasesEnabled: false });
+
 export default defineConfig(({ mode }) => {
 	const env = loadEnv(mode, ".", "");
 	// HOST overrides the app URL for local tunnel dev (e.g. `shopify app dev`).
@@ -19,7 +22,7 @@ export default defineConfig(({ mode }) => {
 		base: app.href,
 		plugins: isTest
 			? []
-			: [preact(), cloudflare({ tunnel: { name: "chris" }, viteEnvironment: { name: "ssr" } })],
+			: [nativePreact(), cloudflare({ tunnel: { name: "chris" }, viteEnvironment: { name: "ssr" } })],
 		server: {
 			allowedHosts: [app.hostname.replace(/^[^.]+(?=\.)/, "")],
 			cors: false,
@@ -43,7 +46,7 @@ export default defineConfig(({ mode }) => {
 			passWithNoTests: true,
 			projects: [
 				{
-					plugins: [preact(), cloudflareTest({ wrangler: { configPath: "./wrangler.json" } })],
+					plugins: [nativePreact(), cloudflareTest({ wrangler: { configPath: "./wrangler.json" } })],
 					test: {
 						name: "server",
 						include: [
@@ -56,7 +59,7 @@ export default defineConfig(({ mode }) => {
 				{
 					// Client code runs in a real browser (Chromium via Playwright) so Polaris
 					// web components actually render — jsdom/happy-dom can't.
-					plugins: [preact()],
+					plugins: [nativePreact()],
 					test: {
 						name: "client",
 						include: ["src/test/client.test.tsx", "src/test/client-entry.test.ts"],
@@ -66,6 +69,17 @@ export default defineConfig(({ mode }) => {
 							provider: playwright(),
 							instances: [{ browser: "chromium" }],
 						},
+					},
+				},
+				{
+					plugins: [nativePreact()],
+					test: {
+						name: "unit",
+						environment: "node",
+						include: [
+							"src/test/configuration.story.test.ts",
+							"src/test/configuration-record.test.ts",
+						],
 					},
 				},
 			],

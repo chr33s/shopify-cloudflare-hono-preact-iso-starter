@@ -1,6 +1,7 @@
 import { SELF, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { withCors } from "../server/shopify.ts";
+import { readConfiguration, writeConfiguration } from "#/configuration/record.ts";
 
 const APP_ORIGIN = "https://app.example.com";
 const PROXY_PATH = "/apps/shopify-starter";
@@ -178,6 +179,16 @@ describe("/shopify/admin", () => {
 
 		expect(await response.text()).not.toContain("Cannot read properties");
 	});
+
+	it("bounces unauthenticated configuration reads", async () => {
+		const response = await SELF.fetch(`${APP_ORIGIN}/api/configuration`, {
+			headers: { Accept: "application/json" },
+			redirect: "manual",
+		});
+
+		expect(response.status).not.toBe(500);
+		expect([302, 401]).toContain(response.status);
+	});
 });
 
 describe("webhooks", () => {
@@ -195,13 +206,21 @@ describe("webhooks", () => {
 		expect(response.status).toBe(401);
 	});
 
-	it("drops the stored session on app/uninstalled", async () => {
+	it("drops the stored session and configuration on app/uninstalled", async () => {
 		await storeSession(VICTIM);
+		await writeConfiguration(env.SESSION_KV, VICTIM, {
+			title: "Summer",
+			productIds: ["gid://shopify/Product/9"],
+		});
 		const body = JSON.stringify({ domain: VICTIM });
 		const response = await postWebhook("app/uninstalled", VICTIM, await signWebhook(body), body);
 
 		expect(response.status).toBe(204);
 		expect(await env.SESSION_KV.get(`admin:${VICTIM}`)).toBeNull();
+		expect(await readConfiguration(env.SESSION_KV, VICTIM)).toEqual({
+			title: "",
+			productIds: [],
+		});
 	});
 });
 

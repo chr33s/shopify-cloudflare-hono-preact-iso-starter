@@ -1,6 +1,8 @@
 import { ErrorBoundary } from "preact-iso";
 import { LocationProvider, Route, Router, useLocation } from "preact-iso/router";
 import { useEffect, useState } from "preact/hooks";
+import { ConfigurationRoute } from "#/client/configuration-route.tsx";
+import { AppNav } from "#/client/app-nav.tsx";
 
 export function App() {
 	return (
@@ -10,6 +12,7 @@ export function App() {
 				<Router>
 					<Route path="/" component={Home} />
 					<Route path="/dashboard" component={Dashboard} />
+					<Route path="/configuration" component={ConfigurationRoute} />
 					<Route default component={NotFound} />
 				</Router>
 			</ErrorBoundary>
@@ -54,10 +57,11 @@ function ShopifyNavigation() {
 
 			e.preventDefault();
 			e.stopImmediatePropagation();
-			// route() -> history.pushState, which App Bridge mirrors to the admin
-			// address bar (deep-link, reload, back/forward). No window.navigation
-			// dependency, so it also works standalone and on "/" before App Bridge loads.
-			route(url.pathname + url.search + url.hash);
+			const destination = url.pathname + url.search + url.hash;
+			void confirmLeave().then(
+				() => route(destination),
+				() => {},
+			);
 		}
 
 		// App Bridge updates the parent admin URL for s-app-nav links and fires
@@ -73,7 +77,11 @@ function ShopifyNavigation() {
 			}
 			if (dest.origin !== location.origin) return;
 			if (dest.pathname + dest.search === location.pathname + location.search) return;
-			route(dest.pathname + dest.search + dest.hash);
+			const destination = dest.pathname + dest.search + dest.hash;
+			void confirmLeave().then(
+				() => route(destination),
+				() => {},
+			);
 		}
 
 		document.addEventListener("click", onClick, true);
@@ -86,6 +94,13 @@ function ShopifyNavigation() {
 
 	return null;
 }
+
+function confirmLeave() {
+	const saveBar = globalThis.shopify?.saveBar;
+	if (!saveBar) return Promise.resolve();
+	return saveBar.leaveConfirmation();
+}
+
 
 function Home() {
 	const { query } = useLocation();
@@ -152,12 +167,7 @@ function Dashboard() {
 
 	return (
 		<s-page heading="Dashboard">
-			<s-app-nav>
-				<s-link href="/" {...{ rel: "home" }}>
-					Home
-				</s-link>
-				<s-link href="/dashboard">Dashboard</s-link>
-			</s-app-nav>
+			<AppNav />
 
 			<s-stack slot="secondary-actions">Action</s-stack>
 
@@ -179,6 +189,7 @@ function Dashboard() {
 function NotFound() {
 	return (
 		<s-page heading="Not found">
+			<AppNav />
 			<s-section>
 				<s-paragraph>That page does not exist.</s-paragraph>
 				<s-link href="/dashboard">Return to the dashboard</s-link>

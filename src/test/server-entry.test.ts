@@ -22,6 +22,13 @@ describe("renderApp", () => {
 		expect(html).toContain("<s-spinner");
 	});
 
+	it("SSRs the configuration shell without starting Foldkit", async () => {
+		const html = await renderApp("/configuration");
+		expect(html).toContain('heading="Product configuration"');
+		expect(html).toContain("<s-spinner");
+		expect(html).toContain('href="/configuration"');
+	});
+
 	it("renders the not-found route for unknown paths", async () => {
 		const html = await renderApp("/does-not-exist");
 		expect(html).toContain('heading="Not found"');

@@ -15,6 +15,17 @@ describe("App", () => {
 		expect(container.querySelector('s-text-field[name="shop"]')).not.toBeNull();
 	});
 
+	it("renders the configuration route shell", () => {
+		window.history.replaceState(null, "", "/configuration");
+
+		const { container } = render(<App />);
+
+		expect(container.querySelector("s-page")?.getAttribute("heading")).toBe(
+			"Product configuration",
+		);
+		expect(container.querySelector("s-spinner")).not.toBeNull();
+	});
+
 	it("renders the not-found route for unknown paths", () => {
 		window.history.replaceState(null, "", "/does-not-exist");
 

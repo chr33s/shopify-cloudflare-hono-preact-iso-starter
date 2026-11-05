@@ -16,8 +16,14 @@ A minimal embedded Shopify app on Cloudflare Workers: [Hono](https://hono.dev) s
   so duplicate params stay visible to it). Local extensions cover what the library doesn't:
   token exchange with expiring offline tokens + refresh, KV session storage, and the embedded
   CSP/bounce headers.
-- **Client** — Preact SSR'd by the worker, hydrated in the browser. Routes in `src/client/app.tsx`.
-- **Storage** — one KV namespace (`SESSION_KV`) for offline sessions.
+- **Client** — Preact 11 SSR'd by the worker, hydrated in the browser. Routes in `src/client/app.tsx`.
+  The Vite preset runs with `reactAliasesEnabled: false` (no `preact/compat` or React aliases).
+- **Foldkit** — The `/configuration` route is a native Preact host. It loads the saved record,
+  then mounts a Foldkit element (`Runtime.makeElement` + `Runtime.embed`) for the product
+  configuration workflow: draft versus saved state, the product picker, and save/discard.
+  App Bridge and `/api/configuration` run as Foldkit Commands. The host keeps routing.
+- **Storage** — one KV namespace (`SESSION_KV`) for offline sessions and, under
+  `configuration:${shop}`, the product configuration. Uninstall deletes both.
 
 ## Setup
 
@@ -67,6 +73,8 @@ npx vp run deploy            # build, then `wrangler deploy`
 - `GET /shopify/session-token-bounce` — boots App Bridge for session-token reloads.
 - `POST /shopify/webhooks` — validates webhook HMACs (`app/uninstalled` + mandatory GDPR topics).
 - `ALL /shopify/admin` — session-token-gated Admin GraphQL passthrough (the embedded client POSTs here).
+- `GET /api/configuration` — session-token-gated read of the shop's product configuration.
+- `PUT /api/configuration` — session-token-gated save of `{ title, productIds }`.
 - `ALL /shopify/customer` — verifies the caller's Shopify auth and returns the customer id + shop.
 - `ALL /apps/*` — app-proxy catch-all; verifies the proxy signature and echoes the shop.
 - `GET *` — SSR of the Preact app (everything else).
