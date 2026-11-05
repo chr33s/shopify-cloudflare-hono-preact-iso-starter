@@ -146,7 +146,7 @@ type Attempt<A> =
 	| { readonly ok: true; readonly value: A }
 	| { readonly ok: false; readonly cause: unknown };
 
-function attemptPromise<A>(run: () => Promise<A>) {
+function attemptPromise<A>(run: (signal: AbortSignal) => Promise<A>) {
 	return Effect.tryPromise({
 		try: run,
 		catch: (cause): unknown => cause,
@@ -243,7 +243,7 @@ const ApiHandlers = HttpApiBuilder.group(Api, "api", (handlers) =>
 );
 
 function fetchAsset(request: Request) {
-	return attemptPromise(() => env.ASSETS.fetch(request)).pipe(
+	return attemptPromise((signal) => env.ASSETS.fetch(request, { signal })).pipe(
 		Effect.map((result) =>
 			result.ok ? passThrough(result.value) : publicError(request, result.cause),
 		),
@@ -412,14 +412,14 @@ const renderPage = (serverRequest: ServerRequest) => {
 		// Skip ASSETS for "/" and "/index.html" to avoid serving the un-SSR'd template.
 		// Vite dev URLs (/@vite/*, /@id/*, /src/*) still resolve through ASSETS.
 		if (url.pathname !== "/" && url.pathname !== "/index.html") {
-			const asset = yield* attemptPromise(() => env.ASSETS.fetch(request));
+			const asset = yield* attemptPromise((signal) => env.ASSETS.fetch(request, { signal }));
 			if (!asset.ok) return publicError(request, asset.cause);
 			if (asset.value.status !== 404) return passThrough(asset.value);
 			void asset.value.body?.cancel();
 		}
 
-		const templateRes = yield* attemptPromise(() =>
-			env.ASSETS.fetch(new URL("/index.html", url.origin)),
+		const templateRes = yield* attemptPromise((signal) =>
+			env.ASSETS.fetch(new URL("/index.html", url.origin), { signal }),
 		);
 		if (!templateRes.ok) return publicError(request, templateRes.cause);
 		const template = yield* attemptPromise(() => templateRes.value.text());

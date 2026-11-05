@@ -41,8 +41,10 @@ function asError(cause: unknown) {
 }
 
 export const liveAdminUi = AdminUi.of({
-	pickProducts: (selectedIds) =>
-		Effect.tryPromise({
+	pickProducts: Effect.fn("AdminUi.pickProducts")(function* (
+		selectedIds: ReadonlyArray<string>,
+	): Effect.fn.Return<PickerOutcome, string> {
+		const selection = yield* Effect.tryPromise({
 			try: () =>
 				bridge().resourcePicker({
 					type: "product",
@@ -52,44 +54,46 @@ export const liveAdminUi = AdminUi.of({
 					selectionIds: selectedIds.map((id) => ({ id })),
 				}),
 			catch: asError,
-		}).pipe(
-			Effect.flatMap((selection): Effect.Effect<PickerOutcome, string> => {
-				if (selection === undefined) {
-					return Effect.succeed({ _tag: "Cancelled" });
-				}
-				return Schema.decodeUnknownEffect(Schema.Array(PickerProduct))(selection).pipe(
-					Effect.map(
-						(products): PickerOutcome => ({
-							_tag: "Picked",
-							products: products.map((product) => ({
-								id: product.id,
-								title: product.title?.trim() ? product.title.trim() : product.id,
-							})),
-						}),
-					),
-					Effect.mapError(() => "The product picker returned an unexpected selection."),
-				);
-			}),
-		),
-	showToast: (message, isError) =>
-		Effect.tryPromise({
+		});
+		if (selection === undefined) {
+			return { _tag: "Cancelled" } as const;
+		}
+		const products = yield* Schema.decodeUnknownEffect(Schema.Array(PickerProduct))(selection).pipe(
+			Effect.mapError(() => "The product picker returned an unexpected selection."),
+		);
+		return {
+			_tag: "Picked" as const,
+			products: products.map((product) => ({
+				id: product.id,
+				title: product.title?.trim() ? product.title.trim() : product.id,
+			})),
+		};
+	}),
+	showToast: Effect.fn("AdminUi.showToast")(function* (
+		message: string,
+		isError: boolean,
+	): Effect.fn.Return<void, string> {
+		yield* Effect.tryPromise({
 			try: async () => {
 				bridge().toast.show(message, { isError });
 			},
 			catch: asError,
-		}),
-	showSaveBar: () =>
-		Effect.tryPromise({
+		});
+	}),
+	showSaveBar: Effect.fn("AdminUi.showSaveBar")(function* (): Effect.fn.Return<void, string> {
+		yield* Effect.tryPromise({
 			try: () => bridge().saveBar.show(SAVE_BAR_ID),
 			catch: asError,
-		}),
-	hideSaveBar: () =>
-		Effect.tryPromise({
+		});
+	}),
+	hideSaveBar: Effect.fn("AdminUi.hideSaveBar")(function* (): Effect.fn.Return<void, string> {
+		yield* Effect.tryPromise({
 			try: () => bridge().saveBar.hide(SAVE_BAR_ID),
 			catch: asError,
-		}),
-	confirmLeave: () =>
-		Effect.tryPromise({
+		});
+	}),
+	confirmLeave: Effect.fn("AdminUi.confirmLeave")(function* (): Effect.fn.Return<void, LeaveError> {
+		yield* Effect.tryPromise({
 			try: () => {
 				const leaveConfirmation = globalThis.shopify?.saveBar?.leaveConfirmation;
 				if (!leaveConfirmation) {
@@ -103,5 +107,6 @@ export const liveAdminUi = AdminUi.of({
 				}
 				return { _tag: "Stayed" };
 			},
-		}),
+		});
+	}),
 });

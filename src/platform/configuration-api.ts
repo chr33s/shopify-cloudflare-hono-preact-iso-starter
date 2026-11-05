@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { Product } from "#/features/configuration/model.ts";
 
 export const ConfigurationBody = Schema.Struct({
@@ -15,50 +15,76 @@ const ConfigurationWrite = Schema.Struct({
 });
 type ConfigurationWrite = typeof ConfigurationWrite.Type;
 
-async function readJson(response: Response): Promise<unknown> {
-	if (!response.ok) {
-		let detail = "";
-		try {
-			const body = (await response.json()) as { error?: unknown };
-			if (typeof body.error === "string") {
-				detail = ` ${body.error}`;
-			}
-		} catch {
-			// Non-JSON error bodies still surface via the status code.
-		}
-		throw new Error(`Request failed (${response.status}).${detail}`);
-	}
-	return response.json();
+const ErrorBody = Schema.Struct({
+	error: Schema.optional(Schema.String),
+});
+
+function message(cause: unknown) {
+	return cause instanceof Error ? cause.message : String(cause);
 }
 
-function decodeBody(input: unknown) {
-	return Schema.decodeUnknownEffect(ConfigurationBody)(input).pipe(
+const decodeBody = Schema.decodeUnknownEffect(ConfigurationBody);
+
+// A non-JSON or unexpected error body still fails with the status. The message
+// is kept only when the payload is `{ error: string }`.
+function readJson(response: Response) {
+	return Effect.gen(function* () {
+		if (!response.ok) {
+			const body = yield* Effect.tryPromise({
+				try: () => response.json(),
+				catch: () => undefined,
+			}).pipe(Effect.orElseSucceed(() => undefined));
+			const decoded = Schema.decodeUnknownOption(ErrorBody)(body);
+			const detail =
+				Option.isSome(decoded) && decoded.value.error !== undefined
+					? ` ${decoded.value.error}`
+					: "";
+			return yield* Effect.fail(`Request failed (${response.status}).${detail}`);
+		}
+
+		return yield* Effect.tryPromise({
+			try: () => response.json(),
+			catch: message,
+		});
+	});
+}
+
+export const loadConfiguration = Effect.fn("ConfigurationApi.load")(function* (): Effect.fn.Return<
+	ConfigurationBody,
+	string
+> {
+	const response = yield* Effect.tryPromise({
+		try: (signal) =>
+			fetch("/api/configuration", {
+				headers: { Accept: "application/json" },
+				signal,
+			}),
+		catch: message,
+	});
+	const body = yield* readJson(response);
+	return yield* decodeBody(body).pipe(
 		Effect.mapError(() => "The server returned an unexpected configuration."),
 	);
-}
+});
 
-export const loadConfiguration = Effect.tryPromise({
-	try: async () => {
-		const response = await fetch("/api/configuration", {
-			headers: { Accept: "application/json" },
-		});
-		return readJson(response);
-	},
-	catch: (cause) => (cause instanceof Error ? cause.message : String(cause)),
-}).pipe(Effect.flatMap(decodeBody));
-
-export const saveConfiguration = (body: ConfigurationWrite) =>
-	Effect.tryPromise({
-		try: async () => {
-			const response = await fetch("/api/configuration", {
+export const saveConfiguration = Effect.fn("ConfigurationApi.save")(function* (
+	body: ConfigurationWrite,
+): Effect.fn.Return<ConfigurationBody, string> {
+	const response = yield* Effect.tryPromise({
+		try: (signal) =>
+			fetch("/api/configuration", {
 				method: "PUT",
 				headers: {
 					Accept: "application/json",
 					"Content-Type": "application/json",
 				},
 				body: JSON.stringify(body),
-			});
-			return readJson(response);
-		},
-		catch: (cause) => (cause instanceof Error ? cause.message : String(cause)),
-	}).pipe(Effect.flatMap(decodeBody));
+				signal,
+			}),
+		catch: message,
+	});
+	const payload = yield* readJson(response);
+	return yield* decodeBody(payload).pipe(
+		Effect.mapError(() => "The server returned an unexpected configuration."),
+	);
+});

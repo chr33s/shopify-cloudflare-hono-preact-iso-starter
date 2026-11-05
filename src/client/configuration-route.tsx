@@ -26,7 +26,7 @@ export function ConfigurationRoute() {
 		let unsubscribe = () => {};
 		let dispose = () => {};
 
-		void Effect.runPromise(loadConfiguration).then(
+		void Effect.runPromise(loadConfiguration()).then(
 			(flags) => {
 				if (!active) return;
 				const handle = Runtime.embed(makeConfigurationElement(mount, flags));
