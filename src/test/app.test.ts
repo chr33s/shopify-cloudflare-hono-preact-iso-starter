@@ -102,6 +102,8 @@ describe("app proxy", () => {
 		);
 
 		expect(response.status).toBe(400);
+		expect(response.headers.get("content-type")).toContain("text/plain");
+		expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
 		expect(await response.text()).not.toContain(VICTIM);
 	});
 
@@ -167,6 +169,9 @@ describe("/shopify/admin", () => {
 
 		expect(response.status).not.toBe(500);
 		expect([302, 401]).toContain(response.status);
+		if (response.status === 302) {
+			expect(response.headers.get("Location")).toContain("/shopify/session-token-bounce");
+		}
 	});
 
 	it("does not leak internal error detail to the client", async () => {
@@ -204,6 +209,9 @@ describe("webhooks", () => {
 		const response = await postWebhook("shop/redact", VICTIM, "not-a-valid-hmac", body);
 
 		expect(response.status).toBe(401);
+		expect(response.headers.get("content-type")).toContain("application/json");
+		expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+		await expect(response.json()).resolves.toEqual({ error: expect.any(String) });
 	});
 
 	it("drops the stored session and configuration on app/uninstalled", async () => {
@@ -242,6 +250,7 @@ describe("CORS", () => {
 		});
 
 		expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://admin.shopify.com");
+		await expect(response.json()).resolves.toEqual({ ok: true });
 	});
 
 	it("attaches CORS to responses whose headers are immutable", async () => {
@@ -258,6 +267,35 @@ describe("CORS", () => {
 		expect(result.headers.get("Access-Control-Expose-Headers")).toBe(
 			"X-Shopify-Retry-Invalid-Session-Request",
 		);
+	});
+
+	it("keeps a data response body and applies CORS once", async () => {
+		const response = await SELF.fetch(`${APP_ORIGIN}/?_data=1`, {
+			headers: { Origin: "https://admin.shopify.com" },
+		});
+		const html = await response.text();
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://admin.shopify.com");
+		expect(response.headers.get("Vary")).toBe("Origin");
+		expect(html).toContain('heading="Install"');
+	});
+});
+
+describe("routing", () => {
+	it("does not alias /healthz by case or a trailing slash", async () => {
+		for (const path of ["/Healthz", "/healthz/"]) {
+			const response = await SELF.fetch(`${APP_ORIGIN}${path}`, {
+				headers: { Accept: "application/json" },
+			});
+			expect(await response.text()).not.toContain('"ok":true');
+		}
+	});
+
+	it("serves exact /apps as the app shell, not the proxy", async () => {
+		const response = await SELF.fetch(`${APP_ORIGIN}/apps`);
+		expect(response.status).toBe(200);
+		expect(await response.text()).toContain('heading="Not found"');
 	});
 });
 

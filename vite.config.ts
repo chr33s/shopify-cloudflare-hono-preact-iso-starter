@@ -55,6 +55,7 @@ export default defineConfig(({ mode }) => {
 					],
 					test: {
 						name: "server",
+						globalSetup: ["./src/test/assets-setup.ts"],
 						include: [
 							"src/test/app.test.ts",
 							"src/test/shopify.test.ts",

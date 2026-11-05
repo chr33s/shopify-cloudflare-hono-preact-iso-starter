@@ -1,13 +1,13 @@
 # Shopify Starter
 
-A minimal embedded Shopify app on Cloudflare Workers: [Hono](https://hono.dev) server,
+A minimal embedded Shopify app on Cloudflare Workers: [Effect](https://effect.website) HttpApi server,
 [Preact](https://preactjs.com) UI with SSR + hydration via
 [preact-iso](https://github.com/preactjs/preact-iso), Shopify token-exchange auth, and
 [Polaris web components](https://shopify.dev/docs/api/app-home) + App Bridge in the embedded admin.
 
 ## Stack
 
-- **Server** — Hono on Workers. Routes defined in `src/server/app.ts`, Shopify auth core in
+- **Server** — Effect `HttpApi` + `HttpRouter` on Workers (`effect/http-api`, `effect/http`). Routes defined in `src/server/app.ts`, Shopify auth core in
   `src/server/shopify.ts`.
 - **Shopify auth** — [`@shopify/shopify-api`](https://github.com/Shopify/shopify-api-js) (via its
   `cf-worker` adapter) handles the security primitives: session-token decode, webhook HMAC, and
