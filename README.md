@@ -74,7 +74,7 @@ npx vp run deploy            # build, then `wrangler deploy`
 - `POST /shopify/webhooks` — validates webhook HMACs (`app/uninstalled` + mandatory GDPR topics).
 - `ALL /shopify/admin` — session-token-gated Admin GraphQL passthrough (the embedded client POSTs here).
 - `GET /api/configuration` — session-token-gated read of the shop's product configuration.
-- `PUT /api/configuration` — session-token-gated save of `{ title, productIds }`.
+- `PUT /api/configuration` — session-token-gated save of `{ title, products, expectedRevision }`. A stale `expectedRevision` is rejected.
 - `ALL /shopify/customer` — verifies the caller's Shopify auth and returns the customer id + shop.
 - `ALL /apps/*` — app-proxy catch-all; verifies the proxy signature and echoes the shop.
 - `GET *` — SSR of the Preact app (everything else).

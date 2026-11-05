@@ -1,19 +1,20 @@
 import { Schema } from "effect";
 import { defineMessageUnion } from "foldkit/message";
+import { Product } from "#/features/configuration/model.ts";
 
 export const Message = defineMessageUnion({
-	ChangedTitle: { value: Schema.String },
+	UpdatedTitle: { value: Schema.String },
 	ClickedPickProducts: {},
-	PickedProducts: { ids: Schema.Array(Schema.String) },
-	CancelledPickProducts: {},
+	SucceededPickProducts: { products: Schema.Option(Schema.Array(Product)) },
 	FailedPickProducts: { error: Schema.String },
 	ClickedSave: {},
-	SucceededSave: {
+	SucceededSaveConfiguration: {
 		title: Schema.String,
-		productIds: Schema.Array(Schema.String),
+		products: Schema.Array(Product),
 		revision: Schema.Number,
+		savedRevision: Schema.Number,
 	},
-	FailedSave: { error: Schema.String, revision: Schema.Number },
+	FailedSaveConfiguration: { error: Schema.String, revision: Schema.Number },
 	ClickedDiscard: {},
 	ClickedBack: {},
 	CompletedPlatform: {},

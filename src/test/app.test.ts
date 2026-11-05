@@ -210,7 +210,8 @@ describe("webhooks", () => {
 		await storeSession(VICTIM);
 		await writeConfiguration(env.SESSION_KV, VICTIM, {
 			title: "Summer",
-			productIds: ["gid://shopify/Product/9"],
+			products: [{ id: "gid://shopify/Product/9", title: "Tee" }],
+			revision: 1,
 		});
 		const body = JSON.stringify({ domain: VICTIM });
 		const response = await postWebhook("app/uninstalled", VICTIM, await signWebhook(body), body);
@@ -219,7 +220,8 @@ describe("webhooks", () => {
 		expect(await env.SESSION_KV.get(`admin:${VICTIM}`)).toBeNull();
 		expect(await readConfiguration(env.SESSION_KV, VICTIM)).toEqual({
 			title: "",
-			productIds: [],
+			products: [],
+			revision: 0,
 		});
 	});
 });

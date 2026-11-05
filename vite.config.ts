@@ -22,7 +22,10 @@ export default defineConfig(({ mode }) => {
 		base: app.href,
 		plugins: isTest
 			? []
-			: [nativePreact(), cloudflare({ tunnel: { name: "chris" }, viteEnvironment: { name: "ssr" } })],
+			: [
+					nativePreact(),
+					cloudflare({ tunnel: { name: "chris" }, viteEnvironment: { name: "ssr" } }),
+				],
 		server: {
 			allowedHosts: [app.hostname.replace(/^[^.]+(?=\.)/, "")],
 			cors: false,
@@ -46,7 +49,10 @@ export default defineConfig(({ mode }) => {
 			passWithNoTests: true,
 			projects: [
 				{
-					plugins: [nativePreact(), cloudflareTest({ wrangler: { configPath: "./wrangler.json" } })],
+					plugins: [
+						nativePreact(),
+						cloudflareTest({ wrangler: { configPath: "./wrangler.json" } }),
+					],
 					test: {
 						name: "server",
 						include: [
@@ -78,6 +84,7 @@ export default defineConfig(({ mode }) => {
 						environment: "node",
 						include: [
 							"src/test/configuration.story.test.ts",
+							"src/test/configuration.scene.test.ts",
 							"src/test/configuration-record.test.ts",
 						],
 					},

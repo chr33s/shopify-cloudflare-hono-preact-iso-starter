@@ -1,17 +1,28 @@
 import { Effect, Schema } from "effect";
+import { Product } from "#/features/configuration/model.ts";
 
 export const ConfigurationBody = Schema.Struct({
 	title: Schema.String,
-	productIds: Schema.Array(Schema.String),
+	products: Schema.Array(Product),
+	revision: Schema.Number,
 });
 export type ConfigurationBody = typeof ConfigurationBody.Type;
+
+const ConfigurationWrite = Schema.Struct({
+	title: Schema.String,
+	products: Schema.Array(Product),
+	expectedRevision: Schema.Number,
+});
+type ConfigurationWrite = typeof ConfigurationWrite.Type;
 
 async function readJson(response: Response): Promise<unknown> {
 	if (!response.ok) {
 		let detail = "";
 		try {
 			const body = (await response.json()) as { error?: unknown };
-			if (typeof body.error === "string") detail = ` ${body.error}`;
+			if (typeof body.error === "string") {
+				detail = ` ${body.error}`;
+			}
 		} catch {
 			// Non-JSON error bodies still surface via the status code.
 		}
@@ -36,7 +47,7 @@ export const loadConfiguration = Effect.tryPromise({
 	catch: (cause) => (cause instanceof Error ? cause.message : String(cause)),
 }).pipe(Effect.flatMap(decodeBody));
 
-export const saveConfiguration = (body: ConfigurationBody) =>
+export const saveConfiguration = (body: ConfigurationWrite) =>
 	Effect.tryPromise({
 		try: async () => {
 			const response = await fetch("/api/configuration", {

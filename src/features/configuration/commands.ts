@@ -1,20 +1,21 @@
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { Command, Port } from "foldkit";
-import { AdminUi } from "#/platform/admin-ui.ts";
-import { saveConfiguration } from "#/platform/configuration-api.ts";
+import { Product } from "#/features/configuration/model.ts";
 import { Message } from "#/features/configuration/message.ts";
 import { ports } from "#/features/configuration/ports.ts";
+import { AdminUi } from "#/platform/admin-ui.ts";
+import { saveConfiguration } from "#/platform/configuration-api.ts";
 
 export const PickProducts = Command.define("PickProducts", {
 	args: { selectedIds: Schema.Array(Schema.String) },
-	messages: [Message.PickedProducts, Message.CancelledPickProducts, Message.FailedPickProducts],
+	messages: [Message.SucceededPickProducts, Message.FailedPickProducts],
 	execute: ({ selectedIds }) =>
 		AdminUi.use((admin) =>
 			admin.pickProducts(selectedIds).pipe(
 				Effect.map((outcome) =>
 					outcome._tag === "Cancelled"
-						? Message.CancelledPickProducts()
-						: Message.PickedProducts({ ids: outcome.ids }),
+						? Message.SucceededPickProducts({ products: Option.none() })
+						: Message.SucceededPickProducts({ products: Option.some(outcome.products) }),
 				),
 				Effect.catch((error) => Effect.succeed(Message.FailedPickProducts({ error }))),
 			),
@@ -24,20 +25,22 @@ export const PickProducts = Command.define("PickProducts", {
 export const SaveConfiguration = Command.define("SaveConfiguration", {
 	args: {
 		title: Schema.String,
-		productIds: Schema.Array(Schema.String),
+		products: Schema.Array(Product),
 		revision: Schema.Number,
+		expectedRevision: Schema.Number,
 	},
-	messages: [Message.SucceededSave, Message.FailedSave],
-	execute: ({ title, productIds, revision }) =>
-		saveConfiguration({ title, productIds }).pipe(
+	messages: [Message.SucceededSaveConfiguration, Message.FailedSaveConfiguration],
+	execute: ({ title, products, revision, expectedRevision }) =>
+		saveConfiguration({ title, products, expectedRevision }).pipe(
 			Effect.map((saved) =>
-				Message.SucceededSave({
+				Message.SucceededSaveConfiguration({
 					title: saved.title,
-					productIds: saved.productIds,
+					products: saved.products,
 					revision,
+					savedRevision: saved.revision,
 				}),
 			),
-			Effect.catch((error) => Effect.succeed(Message.FailedSave({ error, revision }))),
+			Effect.catch((error) => Effect.succeed(Message.FailedSaveConfiguration({ error, revision }))),
 		),
 });
 
@@ -75,7 +78,7 @@ export const ShowToast = Command.define("ShowToast", {
 
 export const RequestNavigation = Command.define("RequestNavigation", {
 	args: { href: Schema.String },
-	messages: [Message.CompletedNavigation, Message.StayedForNavigation],
+	messages: [Message.CompletedNavigation, Message.StayedForNavigation, Message.FailedPlatform],
 	execute: ({ href }) =>
 		AdminUi.use((admin) =>
 			admin.confirmLeave().pipe(
@@ -84,7 +87,13 @@ export const RequestNavigation = Command.define("RequestNavigation", {
 						Effect.as(Message.CompletedNavigation()),
 					),
 				),
-				Effect.catch(() => Effect.succeed(Message.StayedForNavigation())),
+				Effect.catch((error) =>
+					Effect.succeed(
+						error._tag === "Stayed"
+							? Message.StayedForNavigation()
+							: Message.FailedPlatform({ error: error.error }),
+					),
+				),
 			),
 		),
 });

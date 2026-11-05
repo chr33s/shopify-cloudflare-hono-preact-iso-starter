@@ -1,24 +1,32 @@
-import { Context, Effect } from "effect";
+import { Context, Effect, Schema } from "effect";
 import { SAVE_BAR_ID } from "#/features/configuration/save-bar.ts";
+import type { Product } from "#/features/configuration/model.ts";
 
 export type PickerOutcome =
-	| { readonly _tag: "Picked"; readonly ids: readonly string[] }
+	| { readonly _tag: "Picked"; readonly products: ReadonlyArray<Product> }
 	| { readonly _tag: "Cancelled" };
+
+export type LeaveError =
+	| { readonly _tag: "Stayed" }
+	| { readonly _tag: "Unavailable"; readonly error: string };
 
 export class AdminUi extends Context.Service<
 	AdminUi,
 	{
-		readonly pickProducts: (selectedIds: readonly string[]) => Effect.Effect<PickerOutcome, string>;
+		readonly pickProducts: (
+			selectedIds: ReadonlyArray<string>,
+		) => Effect.Effect<PickerOutcome, string>;
 		readonly showToast: (message: string, isError: boolean) => Effect.Effect<void, string>;
 		readonly showSaveBar: () => Effect.Effect<void, string>;
 		readonly hideSaveBar: () => Effect.Effect<void, string>;
-		readonly confirmLeave: () => Effect.Effect<void, string>;
+		readonly confirmLeave: () => Effect.Effect<void, LeaveError>;
 	}
 >()("AdminUi") {}
 
-interface ResourceSelection {
-	id: string;
-}
+const PickerProduct = Schema.Struct({
+	id: Schema.String,
+	title: Schema.optional(Schema.String),
+});
 
 function bridge() {
 	const shopifyGlobal = globalThis.shopify;
@@ -35,20 +43,34 @@ function asError(cause: unknown) {
 export const liveAdminUi = AdminUi.of({
 	pickProducts: (selectedIds) =>
 		Effect.tryPromise({
-			try: async () => {
-				const selection = (await bridge().resourcePicker({
+			try: () =>
+				bridge().resourcePicker({
 					type: "product",
 					action: "select",
 					multiple: true,
 					filter: { variants: false },
 					selectionIds: selectedIds.map((id) => ({ id })),
-				})) as ResourceSelection[] | undefined;
-
-				if (selection === undefined) return { _tag: "Cancelled" } as const;
-				return { _tag: "Picked", ids: selection.map((product) => product.id) } as const;
-			},
+				}),
 			catch: asError,
-		}),
+		}).pipe(
+			Effect.flatMap((selection): Effect.Effect<PickerOutcome, string> => {
+				if (selection === undefined) {
+					return Effect.succeed({ _tag: "Cancelled" });
+				}
+				return Schema.decodeUnknownEffect(Schema.Array(PickerProduct))(selection).pipe(
+					Effect.map(
+						(products): PickerOutcome => ({
+							_tag: "Picked",
+							products: products.map((product) => ({
+								id: product.id,
+								title: product.title?.trim() ? product.title.trim() : product.id,
+							})),
+						}),
+					),
+					Effect.mapError(() => "The product picker returned an unexpected selection."),
+				);
+			}),
+		),
 	showToast: (message, isError) =>
 		Effect.tryPromise({
 			try: async () => {
@@ -68,7 +90,18 @@ export const liveAdminUi = AdminUi.of({
 		}),
 	confirmLeave: () =>
 		Effect.tryPromise({
-			try: () => bridge().saveBar.leaveConfirmation(),
-			catch: asError,
+			try: () => {
+				const leaveConfirmation = globalThis.shopify?.saveBar?.leaveConfirmation;
+				if (!leaveConfirmation) {
+					throw Object.assign(new Error("App Bridge is not available"), { unavailable: true });
+				}
+				return leaveConfirmation();
+			},
+			catch: (cause): LeaveError => {
+				if (cause instanceof Error && "unavailable" in cause) {
+					return { _tag: "Unavailable", error: cause.message };
+				}
+				return { _tag: "Stayed" };
+			},
 		}),
 });

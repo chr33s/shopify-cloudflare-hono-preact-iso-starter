@@ -18,7 +18,7 @@ import {
 } from "./shopify.ts";
 import {
 	deleteConfiguration,
-	parseConfigurationBody,
+	parseConfigurationWrite,
 	readConfiguration,
 	writeConfiguration,
 } from "#/configuration/record.ts";
@@ -148,15 +148,8 @@ app.get("/api/configuration", async (c) => {
 	const authenticated = c.get("admin");
 	if (!authenticated) throw new ShopifyError("Unauthorized", 401);
 
-	try {
-		const record = await readConfiguration(c.env.SESSION_KV, authenticated.session.shop);
-		return c.json(record);
-	} catch (error) {
-		if (error instanceof Error && error.message === "Stored configuration is unreadable") {
-			throw new ShopifyError(error.message, 500);
-		}
-		throw error;
-	}
+	const record = await readConfiguration(c.env.SESSION_KV, authenticated.session.shop);
+	return c.json(record);
 });
 
 app.put("/api/configuration", async (c) => {
@@ -170,11 +163,24 @@ app.put("/api/configuration", async (c) => {
 		throw new ShopifyError("Configuration body must be JSON.", 400);
 	}
 
-	const parsed = parseConfigurationBody(body);
+	const parsed = parseConfigurationWrite(body);
 	if (!parsed.ok) throw new ShopifyError(parsed.error, 400);
 
-	await writeConfiguration(c.env.SESSION_KV, authenticated.session.shop, parsed.record);
-	return c.json(parsed.record);
+	const current = await readConfiguration(c.env.SESSION_KV, authenticated.session.shop);
+	if (current.revision !== parsed.value.expectedRevision) {
+		throw new ShopifyError(
+			"This configuration was updated somewhere else. Reload and try again.",
+			409,
+		);
+	}
+
+	const next = {
+		title: parsed.value.title,
+		products: parsed.value.products,
+		revision: current.revision + 1,
+	};
+	await writeConfiguration(c.env.SESSION_KV, authenticated.session.shop, next);
+	return c.json(next);
 });
 
 app.all("/shopify/admin", async (c) => {

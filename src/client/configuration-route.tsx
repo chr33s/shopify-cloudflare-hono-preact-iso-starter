@@ -5,6 +5,7 @@ import { Runtime } from "foldkit";
 import { AppNav } from "#/client/app-nav.tsx";
 import { loadConfiguration } from "#/platform/configuration-api.ts";
 import { makeConfigurationElement } from "#/features/configuration/program.ts";
+import { SAVE_BAR_ID } from "#/features/configuration/save-bar.ts";
 
 export function ConfigurationRoute() {
 	const { route } = useLocation();
@@ -18,7 +19,6 @@ export function ConfigurationRoute() {
 		const host = hostRef.current;
 		if (host === null) return;
 
-		// Preact owns the outer host. Foldkit may replace this inner mount.
 		const mount = document.createElement("div");
 		host.appendChild(mount);
 
@@ -46,6 +46,10 @@ export function ConfigurationRoute() {
 		return () => {
 			active = false;
 			unsubscribe();
+			const saveBar = globalThis.shopify?.saveBar;
+			if (saveBar !== undefined) {
+				void saveBar.hide(SAVE_BAR_ID);
+			}
 			dispose();
 			host.replaceChildren();
 		};
@@ -55,9 +59,7 @@ export function ConfigurationRoute() {
 		<s-page heading="Product configuration">
 			<AppNav />
 			<s-section heading="Editor">
-				{phase === "loading" ? (
-					<s-spinner accessibilityLabel="Loading configuration" />
-				) : null}
+				{phase === "loading" ? <s-spinner accessibilityLabel="Loading configuration" /> : null}
 				{phase === "error" ? <s-banner tone="critical">{loadError}</s-banner> : null}
 				<div ref={hostRef} />
 			</s-section>
