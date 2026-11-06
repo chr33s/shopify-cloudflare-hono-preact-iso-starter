@@ -1,16 +1,12 @@
 import { Effect, Option, Schema } from "effect";
-import { Product } from "#/features/configuration/model.ts";
+import { ConfigurationRecord } from "#/configuration/contract.ts";
 
-export const ConfigurationBody = Schema.Struct({
-	title: Schema.String,
-	products: Schema.Array(Product),
-	revision: Schema.Number,
-});
-export type ConfigurationBody = typeof ConfigurationBody.Type;
+export const ConfigurationBody = ConfigurationRecord;
+export type ConfigurationBody = ConfigurationRecord;
 
 const ConfigurationWrite = Schema.Struct({
-	title: Schema.String,
-	products: Schema.Array(Product),
+	title: ConfigurationRecord.fields.title,
+	products: ConfigurationRecord.fields.products,
 	expectedRevision: Schema.Number,
 });
 type ConfigurationWrite = typeof ConfigurationWrite.Type;

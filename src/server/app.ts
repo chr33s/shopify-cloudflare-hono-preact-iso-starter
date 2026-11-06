@@ -1,4 +1,4 @@
-import { Effect, ErrorReporter, Layer, Schema, Scheduler } from "effect";
+import { Effect, ErrorReporter, Layer, Result, Schema, Scheduler } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http";
 import {
 	HttpApi,
@@ -25,23 +25,13 @@ import {
 	session,
 	webhook,
 } from "./shopify.ts";
+import { deleteConfiguration } from "#/configuration/record.ts";
+import { ConfigurationRecord } from "#/configuration/contract.ts";
 import {
-	deleteConfiguration,
-	parseConfigurationWrite,
-	readConfiguration,
-	writeConfiguration,
-} from "#/configuration/record.ts";
-
-const Product = Schema.Struct({
-	id: Schema.String,
-	title: Schema.String,
-});
-
-const ConfigurationRecord = Schema.Struct({
-	title: Schema.String,
-	products: Schema.Array(Product),
-	revision: Schema.Number,
-});
+	ConfigurationStore,
+	makeConfigurationStore,
+	type ConfigurationStoreError,
+} from "./configuration-store.ts";
 
 class BadRequest extends Schema.Error<BadRequest>("BadRequest")({
 	error: Schema.String,
@@ -142,57 +132,58 @@ function publicError(request: Request, cause: unknown): ServerResponse {
 	return passThrough(withCors(request, response));
 }
 
-type Attempt<A> =
-	| { readonly ok: true; readonly value: A }
-	| { readonly ok: false; readonly cause: unknown };
-
-function attemptPromise<A>(run: (signal: AbortSignal) => Promise<A>) {
-	return Effect.tryPromise({
-		try: run,
-		catch: (cause): unknown => cause,
-	}).pipe(
-		Effect.match({
-			onFailure: (cause): Attempt<A> => ({ ok: false, cause }),
-			onSuccess: (value): Attempt<A> => ({ ok: true, value }),
+function promiseResult<A>(run: (signal: AbortSignal) => Promise<A>) {
+	return Effect.result(
+		Effect.tryPromise({
+			try: run,
+			catch: (cause): unknown => cause,
 		}),
 	);
 }
 
-type AdminGate =
-	| { readonly _tag: "Respond"; readonly response: ServerResponse }
-	| { readonly _tag: "Continue"; readonly admin: AuthenticatedAdmin };
-
-function gateAdmin(request: Request) {
-	return attemptPromise(() => admin(request, env)).pipe(
-		Effect.map((result): AdminGate => {
-			if (!result.ok) return { _tag: "Respond", response: publicError(request, result.cause) };
-			if (result.value instanceof Response) {
-				return { _tag: "Respond", response: passThrough(result.value) };
-			}
-			return { _tag: "Continue", admin: result.value };
+function requireAdmin(request: Request) {
+	return promiseResult(() => admin(request, env)).pipe(
+		Effect.map((result): AuthenticatedAdmin | ServerResponse => {
+			if (Result.isFailure(result)) return publicError(request, result.failure);
+			if (result.success instanceof Response) return passThrough(result.success);
+			return result.success;
 		}),
 	);
 }
+
+function configurationFailure(request: Request, error: ConfigurationStoreError): ServerResponse {
+	if (error._tag === "ConfigurationRejected") {
+		return publicError(request, new ShopifyError(error.message, error.status));
+	}
+	return publicError(request, error.cause);
+}
+
+const ConfigurationStoreLive = Layer.sync(ConfigurationStore, () =>
+	makeConfigurationStore({
+		get: (key, type) => env.SESSION_KV.get(key, type),
+		put: (key, value) => env.SESSION_KV.put(key, value),
+		delete: (key) => env.SESSION_KV.delete(key),
+	}),
+);
 
 const readConfigurationRoute = ({ request }: { readonly request: ServerRequest }) => {
 	const web = asWebRequest(request);
 	return Effect.gen(function* () {
-		const gated = yield* gateAdmin(web);
-		if (gated._tag === "Respond") return gated.response;
+		const authenticated = yield* requireAdmin(web);
+		if (HttpServerResponse.isHttpServerResponse(authenticated)) return authenticated;
 
-		const loaded = yield* attemptPromise(() =>
-			readConfiguration(env.SESSION_KV, gated.admin.session.shop),
-		);
-		if (!loaded.ok) return publicError(web, loaded.cause);
-		return loaded.value;
+		const store = yield* ConfigurationStore;
+		return yield* store
+			.read(authenticated.session.shop)
+			.pipe(Effect.catch((error) => Effect.succeed(configurationFailure(web, error))));
 	});
 };
 
 const saveConfigurationRoute = ({ request }: { readonly request: ServerRequest }) => {
 	const web = asWebRequest(request);
 	return Effect.gen(function* () {
-		const gated = yield* gateAdmin(web);
-		if (gated._tag === "Respond") return gated.response;
+		const authenticated = yield* requireAdmin(web);
+		if (HttpServerResponse.isHttpServerResponse(authenticated)) return authenticated;
 
 		const body = yield* request.json.pipe(
 			Effect.match({
@@ -204,34 +195,10 @@ const saveConfigurationRoute = ({ request }: { readonly request: ServerRequest }
 			return publicError(web, new ShopifyError("Configuration body must be JSON.", 400));
 		}
 
-		const parsed = parseConfigurationWrite(body);
-		if (!parsed.ok) return publicError(web, new ShopifyError(parsed.error, 400));
-
-		const currentResult = yield* attemptPromise(() =>
-			readConfiguration(env.SESSION_KV, gated.admin.session.shop),
-		);
-		if (!currentResult.ok) return publicError(web, currentResult.cause);
-
-		if (currentResult.value.revision !== parsed.value.expectedRevision) {
-			return publicError(
-				web,
-				new ShopifyError(
-					"This configuration was updated somewhere else. Reload and try again.",
-					409,
-				),
-			);
-		}
-
-		const next = {
-			title: parsed.value.title,
-			products: parsed.value.products,
-			revision: currentResult.value.revision + 1,
-		};
-		const written = yield* attemptPromise(() =>
-			writeConfiguration(env.SESSION_KV, gated.admin.session.shop, next),
-		);
-		if (!written.ok) return publicError(web, written.cause);
-		return next;
+		const store = yield* ConfigurationStore;
+		return yield* store
+			.save(authenticated.session.shop, body)
+			.pipe(Effect.catch((error) => Effect.succeed(configurationFailure(web, error))));
 	});
 };
 
@@ -243,9 +210,9 @@ const ApiHandlers = HttpApiBuilder.group(Api, "api", (handlers) =>
 );
 
 function fetchAsset(request: Request) {
-	return attemptPromise((signal) => env.ASSETS.fetch(request, { signal })).pipe(
+	return promiseResult((signal) => env.ASSETS.fetch(request, { signal })).pipe(
 		Effect.map((result) =>
-			result.ok ? passThrough(result.value) : publicError(request, result.cause),
+			Result.isFailure(result) ? publicError(request, result.failure) : passThrough(result.success),
 		),
 	);
 }
@@ -297,22 +264,22 @@ const authCallback = (serverRequest: ServerRequest) => {
 const webhooks = (serverRequest: ServerRequest) => {
 	const request = asWebRequest(serverRequest);
 	return Effect.gen(function* () {
-		const authenticated = yield* attemptPromise(() => webhook(request, env));
-		if (!authenticated.ok) return publicError(request, authenticated.cause);
+		const authenticated = yield* promiseResult(() => webhook(request, env));
+		if (Result.isFailure(authenticated)) return publicError(request, authenticated.failure);
 
-		const topic = authenticated.value.webhook.topic.toLowerCase();
+		const topic = authenticated.success.webhook.topic.toLowerCase();
 		switch (topic) {
 			case "app/uninstalled": {
 				// Drop the offline session so a reinstall mints a fresh one. Keyed off the
 				// HMAC-verified domain, which is present even when no session was stored.
-				const dropped = yield* attemptPromise(() =>
-					session(env).set(authenticated.value.webhook.domain, null),
+				const dropped = yield* promiseResult(() =>
+					session(env).set(authenticated.success.webhook.domain, null),
 				);
-				if (!dropped.ok) return publicError(request, dropped.cause);
-				const deleted = yield* attemptPromise(() =>
-					deleteConfiguration(env.SESSION_KV, authenticated.value.webhook.domain),
+				if (Result.isFailure(dropped)) return publicError(request, dropped.failure);
+				const deleted = yield* promiseResult(() =>
+					deleteConfiguration(env.SESSION_KV, authenticated.success.webhook.domain),
 				);
-				if (!deleted.ok) return publicError(request, deleted.cause);
+				if (Result.isFailure(deleted)) return publicError(request, deleted.failure);
 				break;
 			}
 			// Mandatory GDPR compliance webhooks. This starter stores no customer PII,
@@ -332,52 +299,52 @@ const webhooks = (serverRequest: ServerRequest) => {
 const adminProxy = (serverRequest: ServerRequest) => {
 	const request = asWebRequest(serverRequest);
 	return Effect.gen(function* () {
-		const authenticated = yield* attemptPromise(() => admin(request, env));
-		if (!authenticated.ok) return publicError(request, authenticated.cause);
-		if (authenticated.value instanceof Response) {
-			return passThrough(authenticated.value);
+		const authenticated = yield* promiseResult(() => admin(request, env));
+		if (Result.isFailure(authenticated)) return publicError(request, authenticated.failure);
+		if (authenticated.success instanceof Response) {
+			return passThrough(authenticated.success);
 		}
 
 		// Defence in depth: a route pattern that stops matching must fail closed rather
 		// than run this handler unauthenticated.
-		const authenticatedAdmin = authenticated.value;
-		const upstream = yield* attemptPromise(() => authenticatedAdmin.client.requestRaw(request));
-		if (!upstream.ok) return publicError(request, upstream.cause);
+		const authenticatedAdmin = authenticated.success;
+		const upstream = yield* promiseResult(() => authenticatedAdmin.client.requestRaw(request));
+		if (Result.isFailure(upstream)) return publicError(request, upstream.failure);
 
 		// Cached offline token is stale; drop it and ask App Bridge to retry so
 		// token-exchange mints a fresh one. Mirrors @shopify/shopify-app-remix.
-		if (upstream.value.status === 401) {
-			const dropped = yield* attemptPromise(() =>
+		if (upstream.success.status === 401) {
+			const dropped = yield* promiseResult(() =>
 				session(env).set(authenticatedAdmin.session.shop, null),
 			);
-			if (!dropped.ok) return publicError(request, dropped.cause);
+			if (Result.isFailure(dropped)) return publicError(request, dropped.failure);
 			return passThrough(
-				new Response(upstream.value.body, {
+				new Response(upstream.success.body, {
 					status: 401,
 					headers: {
-						"Content-Type": upstream.value.headers.get("Content-Type") ?? "application/json",
+						"Content-Type": upstream.success.headers.get("Content-Type") ?? "application/json",
 						"X-Shopify-Retry-Invalid-Session-Request": "1",
 					},
 				}),
 			);
 		}
 
-		return passThrough(upstream.value);
+		return passThrough(upstream.success);
 	});
 };
 
 const customerRoute = (serverRequest: ServerRequest) => {
 	const request = asWebRequest(serverRequest);
 	return Effect.gen(function* () {
-		const authenticated = yield* attemptPromise(() => customer(request, env));
-		if (!authenticated.ok) return publicError(request, authenticated.cause);
-		if (authenticated.value instanceof Response) {
-			return passThrough(authenticated.value);
+		const authenticated = yield* promiseResult(() => customer(request, env));
+		if (Result.isFailure(authenticated)) return publicError(request, authenticated.failure);
+		if (authenticated.success instanceof Response) {
+			return passThrough(authenticated.success);
 		}
 		return HttpServerResponse.jsonUnsafe({
-			customer: authenticated.value.customer,
+			customer: authenticated.success.customer,
 			ok: true,
-			shop: authenticated.value.session.shop,
+			shop: authenticated.success.session.shop,
 		});
 	});
 };
@@ -390,12 +357,12 @@ const appProxy = (serverRequest: ServerRequest) => {
 		return fetchAsset(request);
 	}
 	return Effect.gen(function* () {
-		const authenticated = yield* attemptPromise(() => proxy(request, env));
-		if (!authenticated.ok) return publicError(request, authenticated.cause);
+		const authenticated = yield* promiseResult(() => proxy(request, env));
+		if (Result.isFailure(authenticated)) return publicError(request, authenticated.failure);
 		return HttpServerResponse.jsonUnsafe({
 			ok: true,
 			path: new URL(request.url).pathname,
-			shop: authenticated.value.session.shop,
+			shop: authenticated.success.session.shop,
 		});
 	});
 };
@@ -412,29 +379,29 @@ const renderPage = (serverRequest: ServerRequest) => {
 		// Skip ASSETS for "/" and "/index.html" to avoid serving the un-SSR'd template.
 		// Vite dev URLs (/@vite/*, /@id/*, /src/*) still resolve through ASSETS.
 		if (url.pathname !== "/" && url.pathname !== "/index.html") {
-			const asset = yield* attemptPromise((signal) => env.ASSETS.fetch(request, { signal }));
-			if (!asset.ok) return publicError(request, asset.cause);
-			if (asset.value.status !== 404) return passThrough(asset.value);
-			void asset.value.body?.cancel();
+			const asset = yield* promiseResult((signal) => env.ASSETS.fetch(request, { signal }));
+			if (Result.isFailure(asset)) return publicError(request, asset.failure);
+			if (asset.success.status !== 404) return passThrough(asset.success);
+			void asset.success.body?.cancel();
 		}
 
-		const templateRes = yield* attemptPromise((signal) =>
+		const templateRes = yield* promiseResult((signal) =>
 			env.ASSETS.fetch(new URL("/index.html", url.origin), { signal }),
 		);
-		if (!templateRes.ok) return publicError(request, templateRes.cause);
-		const template = yield* attemptPromise(() => templateRes.value.text());
-		if (!template.ok) return publicError(request, template.cause);
-		const appHtml = yield* attemptPromise(() => renderApp(`${url.pathname}${url.search}`));
-		if (!appHtml.ok) return publicError(request, appHtml.cause);
+		if (Result.isFailure(templateRes)) return publicError(request, templateRes.failure);
+		const template = yield* promiseResult(() => templateRes.success.text());
+		if (Result.isFailure(template)) return publicError(request, template.failure);
+		const appHtml = yield* promiseResult(() => renderApp(`${url.pathname}${url.search}`));
+		if (Result.isFailure(appHtml)) return publicError(request, appHtml.failure);
 
 		const nonce = generateCspNonce();
 		// CSP nonce on every <script> so script-src can drop 'unsafe-inline'.
 		// Function replacers throughout: with a string replacement, `$&`/`$'`/`` $` ``
 		// in rendered markup would be interpreted as substitution patterns.
-		const html = template.value
+		const html = template.success
 			.replace(/<script(\s)/g, (_match, space: string) => `<script nonce="${nonce}"${space}`)
 			.replace("<!--head-outlet-->", () => getShopifyHead(request, nonce))
-			.replace("<!--ssr-outlet-->", () => appHtml.value);
+			.replace("<!--ssr-outlet-->", () => appHtml.success);
 		return htmlResponse(request, html, nonce);
 	});
 };
@@ -482,8 +449,8 @@ const guardedConfigurationMethods = ASSET_METHODS.filter((method) => method !== 
 const guardedConfiguration = (serverRequest: ServerRequest) => {
 	const request = asWebRequest(serverRequest);
 	return Effect.gen(function* () {
-		const gated = yield* gateAdmin(request);
-		if (gated._tag === "Respond") return gated.response;
+		const authenticated = yield* requireAdmin(request);
+		if (HttpServerResponse.isHttpServerResponse(authenticated)) return authenticated;
 		return yield* fetchAsset(request);
 	});
 };
@@ -547,13 +514,16 @@ const AppLive = Layer.mergeAll(
 	Cors,
 ).pipe(Layer.provide(HttpServer.layerServices));
 
-const app = HttpRouter.toWebHandler(AppLive.pipe(Layer.provideMerge(SyncScheduler)), {
-	routerConfig: {
-		caseSensitive: true,
-		ignoreDuplicateSlashes: false,
-		ignoreTrailingSlash: false,
+const app = HttpRouter.toWebHandler(
+	AppLive.pipe(Layer.provideMerge(SyncScheduler), Layer.provideMerge(ConfigurationStoreLive)),
+	{
+		routerConfig: {
+			caseSensitive: true,
+			ignoreDuplicateSlashes: false,
+			ignoreTrailingSlash: false,
+		},
 	},
-});
+);
 
 export default {
 	fetch: (request: Request) => app.handler(request),

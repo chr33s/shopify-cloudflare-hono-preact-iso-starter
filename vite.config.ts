@@ -87,6 +87,7 @@ export default defineConfig(({ mode }) => {
 							"src/test/configuration.story.test.ts",
 							"src/test/configuration.scene.test.ts",
 							"src/test/configuration-record.test.ts",
+							"src/test/configuration-store.test.ts",
 						],
 					},
 				},

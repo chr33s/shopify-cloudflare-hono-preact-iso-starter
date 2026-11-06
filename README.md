@@ -8,7 +8,7 @@ A minimal embedded Shopify app on Cloudflare Workers: [Effect](https://effect.we
 ## Stack
 
 - **Server** — Effect `HttpApi` + `HttpRouter` on Workers (`effect/http-api`, `effect/http`). Routes defined in `src/server/app.ts`, Shopify auth core in
-  `src/server/shopify.ts`.
+  `src/server/shopify.ts`. Shop configuration is `ConfigurationStore` (`src/server/configuration-store.ts`); the wire record is `src/configuration/contract.ts`.
 - **Shopify auth** — [`@shopify/shopify-api`](https://github.com/Shopify/shopify-api-js) (via its
   `cf-worker` adapter) handles the security primitives: session-token decode, webhook HMAC, and
   app-proxy HMAC (including timestamp freshness and single-valued query params — requires
